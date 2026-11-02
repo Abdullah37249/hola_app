@@ -1,0 +1,35 @@
+name: hola_professional
+description: "HOLA Professional: salon booking, salon management and field sales app."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  provider: ^6.1.5
+  flutter_svg: ^2.2.1
+  audioplayers: ^6.7.1
+  url_launcher: ^6.3.1
+  image_picker: ^1.2.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+  fonts:
+    - family: InstrumentSans
+      fonts:
+        - asset: assets/fonts/InstrumentSans.ttf
+    - family: DMSerifDisplay
+      fonts:
+        - asset: assets/fonts/DMSerifDisplay-Regular.ttf

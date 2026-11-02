@@ -1,0 +1,11 @@
+// Salon owner + salon staff experiences.
+export 'views/appointment_view.dart' show AppointmentDetailPage;
+export 'views/calendar_view.dart' show SalonCalendar;
+export 'views/engagement_view.dart' show ReviewsPage, FeedbackInboxPage;
+export 'views/menu_view.dart' show SalonMenu, ServiceMenuPage;
+export 'views/more_view.dart' show SalonMore, SStaffMore, BookingSettingsPage;
+export 'views/salon_profile_view.dart' show SalonProfilePage, BranchPage;
+export 'views/setup_view.dart' show SalonSetupPage;
+export 'views/team_view.dart' show SalonTeam, MemberPage, LeaveRequestsPage, MyLeavePage;
+export 'views/today_view.dart' show SalonToday, SStaffToday;
+export 'views/training_view.dart' show SStaffTraining, TrainingPage, TrainingListPage;
