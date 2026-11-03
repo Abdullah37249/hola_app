@@ -1,3 +1,4 @@
+import '../../../core/l10n/l10n.dart';
 import '../../../core/mvvm/repo_view_model.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
@@ -39,7 +40,14 @@ class OrderDetailViewModel extends RepoViewModel {
 enum OrderFilter { open, delivered, all }
 
 class SalonOrdersViewModel extends RepoViewModel {
-  SalonOrdersViewModel(this.trade, this.salons, this.salonId) : super(trade);
+  SalonOrdersViewModel(this.trade, this.salons, this.salonId) : super(trade) {
+    trade.syncCatalogue(); // HOLA's current products and prices
+    trade.syncOrders(salonId);
+    trade.syncCoupons(salonId);
+  }
+
+  /// HOLA's offers for this salon that can still be used.
+  List<SalonCoupon> get offers => trade.coupons(salonId).where((c) => c.available).toList();
   final TradeRepository trade;
   final SalonRepository salons;
   final String salonId;
@@ -48,11 +56,14 @@ class SalonOrdersViewModel extends RepoViewModel {
   Salon? get salon => salons.salon(salonId);
   List<TradeOrder> get all => trade.ordersForSalon(salonId);
   List<TradeOrder> get orders => switch (filter) {
-        OrderFilter.open => all.where((o) => OrderStatus.open.contains(o.status)).toList(),
-        OrderFilter.delivered => all.where((o) => o.status == OrderStatus.delivered || o.status == OrderStatus.confirmed).toList(),
-        OrderFilter.all => all,
-      };
+    OrderFilter.open => all.where((o) => OrderStatus.open.contains(o.status)).toList(),
+    OrderFilter.delivered => all.where((o) => o.status == OrderStatus.delivered || o.status == OrderStatus.confirmed).toList(),
+    OrderFilter.all => all,
+  };
   int get openCount => all.where((o) => OrderStatus.open.contains(o.status)).length;
+
+  /// HOLA products to show on the salon's Today screen.
+  List<Product> get featured => trade.products().take(8).toList();
 
   void setFilter(OrderFilter f) {
     filter = f;
@@ -62,7 +73,11 @@ class SalonOrdersViewModel extends RepoViewModel {
 
 /// Catalogue browsing + cart for one salon. Cart is keyed by variant.
 class NewOrderViewModel extends RepoViewModel {
-  NewOrderViewModel(this.trade, this.salons, this.salonId) : super(trade);
+  NewOrderViewModel(this.trade, this.salons, this.salonId, {this.suggestedCoupon}) : super(trade) {
+    trade.syncCatalogue();
+    trade.syncCoupons(salonId);
+    trade.syncCredit(salonId); // the latest limit and balance before paying on credit
+  }
   final TradeRepository trade;
   final SalonRepository salons;
   final String salonId;
@@ -75,12 +90,17 @@ class NewOrderViewModel extends RepoViewModel {
   String notes = '';
 
   Salon? get salon => salons.salon(salonId);
-  bool get hasCredit => (salon?.creditLimit ?? 0) > 0;
+
+  /// HOLA gave this salon a credit line (udhar), so it can order on credit.
+  bool get hasCredit => credit.limit > 0;
   CreditSummary get credit => trade.credit(salonId);
   PaymentMethod get payment => _payment ?? (hasCredit ? PaymentMethod.credit : PaymentMethod.cod);
 
   List<Product> get allProducts => trade.products();
-  List<String> get categories => [for (final c in productCategories) if (allProducts.any((p) => p.category == c)) c];
+  List<String> get categories => [
+    for (final c in productCategories)
+      if (allProducts.any((p) => p.category == c)) c,
+  ];
   List<Product> get products {
     final q = query.trim().toLowerCase();
     return allProducts.where((p) {
@@ -119,6 +139,53 @@ class NewOrderViewModel extends RepoViewModel {
       _cart[(p.id, v.id)] = q;
     }
     notify();
+    _requote();
+  }
+
+  // ── coupon ──
+  /// Code from the promotion the salon tapped, applied on review.
+  String? suggestedCoupon;
+
+  /// HOLA's coupons for this salon that can still be used.
+  List<SalonCoupon> get availableCoupons => trade.coupons(salonId).where((c) => c.available).toList();
+
+  /// HOLA's price with the coupon applied (null when there is no coupon).
+  OrderQuote? coupon;
+  String? couponError;
+  bool couponBusy = false;
+  int get discount => coupon?.discount ?? 0;
+
+  /// Checks [code] with HOLA and applies its discount, or shows why not.
+  Future<void> applyCoupon(String code) async {
+    if (code.trim().isEmpty) return;
+    couponBusy = true;
+    couponError = null;
+    notify();
+    try {
+      coupon = await trade.quoteWithCoupon(salonId: salonId, cart: cart, couponCode: code);
+    } on DomainError catch (e) {
+      coupon = null;
+      couponError = e.message;
+    } catch (_) {
+      coupon = null;
+      couponError = tr('Couldn’t check the coupon. Try again.');
+    }
+    couponBusy = false;
+    notify();
+  }
+
+  void removeCoupon() {
+    coupon = null;
+    couponError = null;
+    notify();
+  }
+
+  /// The cart changed: ask HOLA again so the discount stays right.
+  void _requote() {
+    final c = coupon?.couponCode;
+    if (c == null) return;
+    if (_cart.isEmpty) return removeCoupon();
+    applyCoupon(c);
   }
 
   void setCategory(String? c) {
@@ -144,13 +211,48 @@ class NewOrderViewModel extends RepoViewModel {
 
   List<CartLine> get cart => [for (final e in _cart.entries) CartLine(e.key.$1, e.key.$2, e.value)];
   List<OrderLine> get lines => trade.quote(cart);
-  int get total => lines.fold(0, (s, l) => s + l.total);
+  int get subtotal => lines.fold(0, (s, l) => s + l.total);
+
+  /// HOLA's quoted total while a coupon is on; otherwise the cart's own sum.
+  int get total => coupon?.total ?? subtotal;
   int get units => lines.fold(0, (s, l) => s + l.qty + l.freeQty);
   int get freeUnits => lines.fold(0, (s, l) => s + l.freeQty);
   bool get isEmpty => _cart.isEmpty;
   bool get overLimit => payment == PaymentMethod.credit && total > credit.available;
 
-  Future<TradeOrder> place() => trade.placeOrder(salonId: salonId, cart: cart, payment: payment, notes: notes);
+  Future<TradeOrder> place() async {
+    final o = await trade.placeOrder(salonId: salonId, cart: cart, payment: payment, notes: notes, couponCode: coupon?.couponCode);
+    // Start fresh: the Products tab keeps this cart while it's open.
+    _cart.clear();
+    notes = '';
+    coupon = null;
+    couponError = null;
+    notify();
+    return o;
+  }
+
+  /// Product and variant behind a cart line (null if it left the catalogue).
+  (Product, Variant)? _of(OrderLine l) {
+    final p = trade.product(l.productId);
+    final v = p?.variants.where((x) => x.id == l.variantId).firstOrNull;
+    return p == null || v == null ? null : (p, v);
+  }
+
+  Product? productOf(OrderLine l) => _of(l)?.$1;
+  int maxFor(OrderLine l) => switch (_of(l)) {
+    (final p, final v) => maxQty(p, v),
+    _ => l.qty,
+  };
+
+  /// Change a line's quantity from the review; 0 removes it.
+  void setLineQty(OrderLine l, int q) {
+    if (_of(l) case (final p, final v)) {
+      setQty(p, v, q);
+    } else {
+      _cart.removeWhere((k, _) => k.$1 == l.productId && k.$2 == l.variantId);
+      notify();
+    }
+  }
 }
 
 /// Credit ledger line with the balance after it.
@@ -161,7 +263,17 @@ class LedgerRow {
 }
 
 class StatementViewModel extends RepoViewModel {
-  StatementViewModel(this.trade, this.salons, this.auth, this.salonId) : super(trade);
+  StatementViewModel(this.trade, this.salons, this.auth, this.salonId) : super(trade) {
+    trade.syncCredit(salonId);
+    trade.syncPaymentRequests(salonId);
+  }
+
+  /// Pull-to-refresh.
+  Future<void> pull() => Future.wait([trade.syncCredit(salonId), trade.syncPaymentRequests(salonId)]);
+
+  /// Payments the salon told HOLA about (newest first).
+  List<PaymentRequest> get payments => trade.paymentRequests(salonId);
+  Future<void> cancelPayment(String id) => trade.cancelPaymentRequest(salonId, id);
   final TradeRepository trade;
   final SalonRepository salons;
   final AuthRepository auth;
@@ -177,7 +289,7 @@ class StatementViewModel extends RepoViewModel {
     var bal = 0;
     final rows = <LedgerRow>[];
     for (final e in oldest) {
-      bal += e.kind == 'CHARGE' ? e.amount : -e.amount;
+      bal = e.balance ?? bal + e.effect;
       rows.add(LedgerRow(e, bal));
     }
     return rows.reversed.toList();
@@ -270,15 +382,50 @@ class ProductEditorViewModel extends RepoViewModel {
   int _n(String s) => int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
 
   Future<Product> save() => trade.saveProduct(
-        id: productId,
-        name: name,
-        category: category,
-        description: description,
-        color: color,
-        shape: shape,
-        variants: [for (final v in variants) Variant(id: v.id, name: v.name.trim(), tradePrice: _n(v.trade), retailPrice: _n(v.retail), stock: _n(v.stock))],
-        schemeBuy: schemeBuy,
-        schemeFree: schemeFree,
-        active: active,
-      );
+    id: productId,
+    name: name,
+    category: category,
+    description: description,
+    color: color,
+    shape: shape,
+    variants: [for (final v in variants) Variant(id: v.id, name: v.name.trim(), tradePrice: _n(v.trade), retailPrice: _n(v.retail), stock: _n(v.stock))],
+    schemeBuy: schemeBuy,
+    schemeFree: schemeFree,
+    active: active,
+  );
+}
+
+/// Paying off the salon's HOLA credit: how much, and how (rider, cash at the
+/// office, or online with a receipt). HOLA confirms before it counts.
+class PayOutstandingViewModel extends RepoViewModel {
+  PayOutstandingViewModel(this.trade, this.salonId) : super(trade) {
+    trade.syncCredit(salonId);
+    trade.syncPaymentRequests(salonId);
+  }
+  final TradeRepository trade;
+  final String salonId;
+
+  CreditSummary get credit => trade.credit(salonId);
+
+  /// Owed now, less payments already waiting for HOLA.
+  int get payable => trade.payableNow(salonId);
+  int get waiting => credit.outstanding - payable;
+
+  /// Rider, or straight to HOLA ([direct]) by cash or online.
+  PayMethod method = PayMethod.rider;
+  bool get direct => method != PayMethod.rider;
+  String? proofPath;
+
+  void setMethod(PayMethod m) {
+    method = m;
+    notify();
+  }
+
+  void setProof(String? path) {
+    proofPath = path;
+    notify();
+  }
+
+  Future<void> submit({required int amount, String reference = ''}) =>
+      trade.requestPayment(salonId, method: method, amount: amount, reference: reference, proofPath: method == PayMethod.online ? proofPath : null);
 }

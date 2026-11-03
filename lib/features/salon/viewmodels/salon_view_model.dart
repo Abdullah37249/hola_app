@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/mvvm/repo_view_model.dart';
 import '../../../core/utils/clock.dart';
+import '../../../core/utils/format.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../domain/services/availability.dart';
@@ -15,12 +16,12 @@ class SalonViewModel extends RepoViewModel {
   SalonViewModel({required this.salons, required this.bookings, required this.engage, required this.field, required this.auth}) : super(salons);
 
   factory SalonViewModel.of(BuildContext c) => SalonViewModel(
-        salons: c.read<SalonRepository>(),
-        bookings: c.read<BookingRepository>(),
-        engage: c.read<EngagementRepository>(),
-        field: c.read<FieldRepository>(),
-        auth: c.read<AuthRepository>(),
-      );
+    salons: c.read<SalonRepository>(),
+    bookings: c.read<BookingRepository>(),
+    engage: c.read<EngagementRepository>(),
+    field: c.read<FieldRepository>(),
+    auth: c.read<AuthRepository>(),
+  );
 
   final SalonRepository salons;
   final BookingRepository bookings;
@@ -36,7 +37,14 @@ class SalonViewModel extends RepoViewModel {
   String get salonId => salon?.id ?? '';
   List<Branch> get branches => salons.branches(salonId);
   Branch? branch(String id) => salons.branch(id);
-  List<StaffProfile> get team => salons.staff(salonId)..sort((a, b) => a.accountId == salon?.ownerId ? -1 : b.accountId == salon?.ownerId ? 1 : a.createdAt.compareTo(b.createdAt));
+  List<StaffProfile> get team => salons.staff(salonId)
+    ..sort(
+      (a, b) => a.accountId == salon?.ownerId
+          ? -1
+          : b.accountId == salon?.ownerId
+          ? 1
+          : a.createdAt.compareTo(b.createdAt),
+    );
   List<StaffProfile> get bookable => team.where((s) => s.bookable).toList();
   StaffProfile? profile(String accountId) => salons.staffProfile(accountId);
   Account? person(String id) => auth.account(id);
@@ -57,8 +65,7 @@ class SalonViewModel extends RepoViewModel {
   List<Appointment> onDay(DateTime d, {String? staffId}) => all.where((a) => sameDay(a.startsAt, d) && (staffId == null || a.staffId == staffId)).toList();
 
   /// Requests waiting for an answer (not yet in the past).
-  List<Appointment> requests({String? staffId}) =>
-      all.where((a) => a.status == ApptStatus.requested && a.endsAt.isAfter(now()) && (staffId == null || a.staffId == staffId)).toList();
+  List<Appointment> requests({String? staffId}) => all.where((a) => a.status == ApptStatus.requested && a.endsAt.isAfter(now()) && (staffId == null || a.staffId == staffId)).toList();
 
   /// Today's appointments that still hold a chair and haven't ended.
   List<Appointment> upNext({String? staffId}) =>
@@ -67,7 +74,8 @@ class SalonViewModel extends RepoViewModel {
   /// The client in the chair (or due now) for a professional.
   Appointment? current(String staffId) {
     final xs = upNext(staffId: staffId);
-    return xs.where((a) => a.status == ApptStatus.inService || a.status == ApptStatus.checkedIn).firstOrNull ?? xs.where((a) => !a.startsAt.isAfter(now().add(const Duration(minutes: 15)))).firstOrNull;
+    return xs.where((a) => a.status == ApptStatus.inService || a.status == ApptStatus.checkedIn).firstOrNull ??
+        xs.where((a) => !a.startsAt.isAfter(now().add(const Duration(minutes: 15)))).firstOrNull;
   }
 
   /// Revenue from today's appointments that are happening or done.
@@ -97,15 +105,35 @@ class SalonViewModel extends RepoViewModel {
 
   List<LeaveRequest> get leave => salons.leave(salonId);
   List<LeaveRequest> get pendingLeave => leave.where((l) => l.status == 'PENDING').toList();
-  List<LeaveRequest> myLeave() => me == null ? const [] : salons.leaveFor(me!.id);
+  List<LeaveRequest> leaveFor(String staffId) => salons.leaveFor(staffId);
   bool onLeave(String staffId, DateTime d) => leave.any((l) => l.staffId == staffId && l.status == 'APPROVED' && l.covers(d));
 
   // ── training ──
 
-  List<Training> get trainings => field.trainings().where((t) => t.status != 'CANCELLED' || t.enrolled.contains(me?.id)).toList();
-  List<Training> get upcomingTrainings => trainings.where((t) => t.status == 'SCHEDULED' && t.at.isAfter(now())).toList();
-  List<Training> get pastTrainings => trainings.where((t) => !(t.status == 'SCHEDULED' && t.at.isAfter(now())) && t.enrolled.contains(me?.id)).toList().reversed.toList();
+  /// Everyone at this salon who can be enrolled: the salon account first, then the team.
+  List<String> get people => {if (me != null) me!.id, ...team.map((p) => p.accountId)}.toList();
+  bool _ours(Training t) => t.enrolled.any(people.contains);
+
+  /// People from this salon enrolled in [t].
+  List<String> enrolledHere(Training t) => people.where(t.enrolled.contains).toList();
+  List<String> attendedHere(Training t) => people.where(t.attended.contains).toList();
+
+  bool isOpen(Training t) => t.status == 'SCHEDULED' && t.at.isAfter(now());
+  List<Training> get trainings => field.trainings().where((t) => t.status != 'CANCELLED' || _ours(t)).toList();
+  List<Training> get upcomingTrainings => trainings.where(isOpen).toList();
+  List<Training> get pastTrainings => trainings.where((t) => !isOpen(t) && _ours(t)).toList().reversed.toList();
   Training? training(String id) => field.training(id);
+
+  /// Sessions [personId] attended, newest first: each one is a certificate.
+  List<Training> certificatesFor(String personId) => field.trainings().where((t) => t.status == 'COMPLETED' && t.attended.contains(personId)).toList().reversed.toList();
+
+  /// Every certificate earned at this salon, newest first.
+  List<(Training, String)> get certificates => [
+    for (final t in field.trainings().reversed)
+      if (t.status == 'COMPLETED')
+        for (final id in attendedHere(t)) (t, id),
+  ];
+  int get minutesTrained => certificates.fold(0, (m, c) => m + c.$1.durationMin);
 
   // ── verification checklist ──
 
@@ -125,25 +153,40 @@ class SalonViewModel extends RepoViewModel {
   Future<void> reschedule(String id, DateTime at, {String? staffId}) => bookings.reschedule(id, at, staffId: staffId);
   Future<void> resubmit() => salons.resubmitSalon(salonId);
   Future<void> decideLeave(String id, bool approve) => salons.decideLeave(id, approve: approve);
-  Future<void> requestLeave(DateTime from, DateTime to, String reason) => salons.requestLeave(from: from, to: to, reason: reason);
+  Future<void> addLeave(String staffId, DateTime from, DateTime to, String reason) => salons.requestLeave(staffId: staffId, from: from, to: to, reason: reason);
   Future<void> withdrawLeave(String id) => salons.cancelLeave(id);
-  Future<void> enrol(String id) => field.enrol(id);
-  Future<void> withdraw(String id) => field.withdraw(id);
+  Future<void> enrol(String id, {String? personId}) => field.enrol(id, personId: personId);
+  Future<void> withdraw(String id, {String? personId}) => field.withdraw(id, personId: personId);
+
+  /// Enrols or withdraws people so exactly [chosen] from this salon are going.
+  Future<void> setEnrolled(Training t, Set<String> chosen) async {
+    final going = enrolledHere(t).toSet();
+    for (final id in going.difference(chosen)) {
+      await field.withdraw(t.id, personId: id);
+    }
+    final add = chosen.difference(going);
+    if (add.length > t.seatsLeft) throw DomainError(tr('Only {n} left in this session.', {'n': plural(t.seatsLeft, 'seat')}));
+    for (final id in add) {
+      await field.enrol(t.id, personId: id);
+    }
+  }
+
   Future<void> reply(String reviewId, String text) => engage.replyToReview(reviewId, text);
   Future<void> resolve(String complaintId, String text) => engage.resolveComplaint(complaintId, text);
   Future<void> setServiceActive(String id, bool on) => salons.setServiceActive(id, on);
   Future<void> deleteService(String id) => salons.deleteService(id);
   Future<void> saveService({String? id, required String name, required String category, required String description, required int price, required int durationMin, required bool active}) =>
       salons.saveService(id: id, salonId: salonId, name: name, category: category, description: description, price: price, durationMin: durationMin, active: active);
-  Future<Account> addStaff({required String name, required String email, required String phone, required String password, required String title}) =>
-      salons.addStaff(salonId, name: name, email: email, phone: phone, password: password, title: title);
+  Future<Account> addStaff({required String name, required String phone, required String title}) => salons.addStaff(salonId, name: name, phone: phone, title: title);
   Future<void> updateStaff(String id, {required String title, required bool bookable, required List<Shift?> week}) => salons.updateStaff(id, title: title, bookable: bookable, week: week);
   Future<void> removeStaff(String id) => salons.removeStaff(id);
   Future<void> updatePolicy({required bool autoConfirm, required int cancelWindowHours, required int noShowGraceMin}) =>
       salons.updatePolicy(salonId, autoConfirm: autoConfirm, cancelWindowHours: cancelWindowHours, noShowGraceMin: noShowGraceMin);
   Future<void> updateSalon({required String name, required String phone, required String about}) => salons.updateSalon(salonId, name: name, phone: phone, about: about);
   Future<void> setPhotos(List<String> photos) => salons.setSalonPhotos(salonId, photos);
-  Future<Branch> addBranch({required String name, required String address, required String area, required String city}) => salons.addBranch(salonId, name: name, address: address, area: area, city: city);
+  Future<Branch> addBranch({required String name, required String address, required String area, required String city}) =>
+      salons.addBranch(salonId, name: name, address: address, area: area, city: city);
+  Future<void> setBranchLocation(String id, GeoFix at) => salons.setBranchLocation(id, at);
   Future<void> updateBranch(String id, {required String name, required String address, required String area, required String city, required List<Shift?> hours}) =>
       salons.updateBranch(id, name: name, address: address, area: area, city: city, hours: hours);
   Future<void> deleteBranch(String id) => salons.deleteBranch(id);
@@ -152,4 +195,8 @@ class SalonViewModel extends RepoViewModel {
 }
 
 /// Greeting for the time of day.
-String greeting(DateTime t) => t.hour < 12 ? tr('Good morning') : t.hour < 17 ? tr('Good afternoon') : tr('Good evening');
+String greeting(DateTime t) => t.hour < 12
+    ? tr('Good morning')
+    : t.hour < 17
+    ? tr('Good afternoon')
+    : tr('Good evening');

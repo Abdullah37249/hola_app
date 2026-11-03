@@ -1,6 +1,7 @@
 import 'package:flutter/painting.dart';
 
 import '../../../core/mvvm/repo_view_model.dart';
+import '../../../core/utils/location.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import 'deliveries_view_model.dart';
@@ -25,13 +26,32 @@ class DeliveryViewModel extends RepoViewModel {
     return Stop(s, bs.isEmpty ? null : bs.first, _auth.account(s.ownerId));
   }
 
+  /// A credit payment the salon hands over with this delivery, if any.
+  CreditCollection? get creditCollection {
+    final o = order;
+    if (o == null || !{OrderStatus.dispatched, OrderStatus.outForDelivery}.contains(o.status)) return null;
+    return _trade.creditCollectionFor(id);
+  }
+
+  Future<void> collectCredit(int amount) => _trade.collectCredit(creditCollection!.requestId, amount);
+
   // ── actions ──
   Future<void> start() => _trade.startDelivery(id);
   Future<void> fail(String reason) => _trade.failDelivery(id, reason);
 
   // ── proof of delivery ──
+  /// HOLA wants a photo of the handover for its orders.
+  bool get needsPhoto => _trade.needsDeliveryPhoto(id);
+  String? photo; // local file of the photo taken
+
+  void setPhoto(String path) {
+    photo = path;
+    notify();
+  }
+
   String recipient = '';
   String cash = '';
+
   /// Strokes in the pad's unit square (0..1), as stored on the order.
   final List<List<Offset>> strokes = [];
 
@@ -65,10 +85,15 @@ class DeliveryViewModel extends RepoViewModel {
 
   int? get cashValue => int.tryParse(cash.replaceAll(RegExp(r'[^0-9]'), ''));
 
-  Future<void> deliver() => _trade.deliver(
-        id,
-        recipientName: recipient,
-        signature: [for (final s in strokes) [for (final p in s) (p.dx, p.dy)]],
-        cashCollected: order!.isCod ? cashValue : null,
-      );
+  /// Hands the order over, recording where (GPS) when the phone can.
+  Future<void> deliver() async => _trade.deliver(
+    id,
+    recipientName: recipient,
+    signature: [
+      for (final s in strokes) [for (final p in s) (p.dx, p.dy)],
+    ],
+    cashCollected: order!.isCod ? cashValue : null,
+    where: await Location.read(),
+    photoPath: photo,
+  );
 }

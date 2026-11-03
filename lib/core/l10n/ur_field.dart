@@ -177,7 +177,8 @@ const Map<String, String> urField = {
   'Location': 'مقام',
   '{n} locations': '{n} مقامات',
   'Menu': 'مینو',
-  "No services yet. Customers can't book until the owner adds a menu, and the salon can't be verified without one.": 'ابھی کوئی سروس نہیں۔ جب تک مالک مینو شامل نہ کرے کسٹمر بکنگ نہیں کر سکتے، اور مینو کے بغیر سیلون کی تصدیق نہیں ہو سکتی۔',
+  "No services yet. Customers can't book until the owner adds a menu, and the salon can't be verified without one.":
+      'ابھی کوئی سروس نہیں۔ جب تک مالک مینو شامل نہ کرے کسٹمر بکنگ نہیں کر سکتے، اور مینو کے بغیر سیلون کی تصدیق نہیں ہو سکتی۔',
   'hidden': 'پوشیدہ',
   '+ {n} more': '+ {n} مزید',
   'Trade credit': 'ٹریڈ کریڈٹ',
@@ -206,7 +207,8 @@ const Map<String, String> urField = {
   'At least one location': 'کم از کم ایک مقام',
   'Services on the menu': 'مینو میں سروسز',
   'Verify this salon': 'اس سیلون کی تصدیق کریں',
-  '{salon} is already live for customers. Verifying adds the HOLA Verified badge and unlocks product orders.': '{salon} کسٹمرز کے لیے پہلے سے فعال ہے۔ تصدیق سے HOLA تصدیق شدہ بیج لگتا ہے اور پروڈکٹ آرڈرز کھل جاتے ہیں۔',
+  '{salon} is already live for customers. Verifying adds the HOLA Verified badge and unlocks product orders.':
+      '{salon} کسٹمرز کے لیے پہلے سے فعال ہے۔ تصدیق سے HOLA تصدیق شدہ بیج لگتا ہے اور پروڈکٹ آرڈرز کھل جاتے ہیں۔',
   'Verify salon': 'سیلون کی تصدیق کریں',
   '{salon} is HOLA Verified': '{salon} اب HOLA تصدیق شدہ ہے',
   'Waiting for the owner': 'مالک کا انتظار',
@@ -241,7 +243,8 @@ const Map<String, String> urField = {
   // Training
   'New session': 'نیا سیشن',
   'No sessions yet': 'ابھی کوئی سیشن نہیں',
-  'Schedule a training session. Salon owners and staff are notified and can enrol from their app.': 'ٹریننگ سیشن طے کریں۔ سیلون مالکان اور اسٹاف کو اطلاع ملتی ہے اور وہ اپنی ایپ سے داخلہ لے سکتے ہیں۔',
+  'Schedule a training session. Salon owners and staff are notified and can enrol from their app.':
+      'ٹریننگ سیشن طے کریں۔ سیلون مالکان اور اسٹاف کو اطلاع ملتی ہے اور وہ اپنی ایپ سے داخلہ لے سکتے ہیں۔',
   'Upcoming': 'آنے والے',
   'Nothing scheduled.': 'کچھ طے نہیں۔',
   'Past': 'گزشتہ',
@@ -284,7 +287,8 @@ const Map<String, String> urField = {
   'Seats left': 'باقی نشستیں',
   'Attended': 'حاضر',
   'Who attended?': 'کون حاضر ہوا؟',
-  'No one has enrolled yet. Salon owners and staff were notified and can enrol from their app.': 'ابھی کسی نے داخلہ نہیں لیا۔ سیلون مالکان اور اسٹاف کو اطلاع دی گئی ہے اور وہ اپنی ایپ سے داخلہ لے سکتے ہیں۔',
+  'No one has enrolled yet. Salon owners and staff were notified and can enrol from their app.':
+      'ابھی کسی نے داخلہ نہیں لیا۔ سیلون مالکان اور اسٹاف کو اطلاع دی گئی ہے اور وہ اپنی ایپ سے داخلہ لے سکتے ہیں۔',
   'No one enrolled.': 'کسی نے داخلہ نہیں لیا۔',
   'Absent': 'غیر حاضر',
   'Tap a person to mark them absent or present.': 'کسی فرد کو غیر حاضر یا حاضر کرنے کے لیے اس پر ٹیپ کریں۔',

@@ -40,7 +40,13 @@ void main() {
     await auth.init();
   });
 
-  Future<Account> signUp(Role r, String name, String email) => auth.signUp(role: r, name: name, email: email, phone: '0300 1234567', password: pw);
+  // Officers and riders come from HOLA: create them, then sign in like the app does.
+  Future<Account> signUp(Role r, String name, String email) async {
+    if (Role.signUp.contains(r)) return auth.signUp(role: r, name: name, email: email, phone: '0300 1234567', password: pw);
+    final a = await auth.provision(role: r, name: name, email: email, phone: '0300 1234567', password: pw);
+    await auth.signIn(email, pw);
+    return a;
+  }
   Future<void> as(String email) => auth.signIn(email, pw).then((_) {});
 
   /// Owner + active salon with one service; officer exists. Returns (salon, service).
@@ -155,18 +161,33 @@ void main() {
     expect(bookings.appointment(a.id)!.status, ApptStatus.noShow);
   });
 
-  test('staff: added by owner, signs in, leave approved blocks their slots', () async {
+  test('sign-up is for customers and salons; officers and riders only sign in', () async {
+    for (final r in [Role.salesOfficer, Role.rider, Role.salonStaff]) {
+      expect(() => auth.signUp(role: r, name: 'Someone', email: '${r.name}@x.pk', phone: '0300 1234567', password: pw), throwsA(isA<DomainError>()));
+    }
+    await auth.provision(role: Role.rider, name: 'Usman Ali', email: 'rider@hola.pk', phone: '0300 1234567', password: pw);
+    expect(auth.current, isNull); // HOLA creates it; the rider then signs in
+    await auth.signIn('rider@hola.pk', pw);
+    expect(auth.current!.role, Role.rider);
+    expect(Role.signUp, [Role.customer, Role.salonOwner]);
+  });
+
+  test('team: added by the salon without a login; salon adds time off that blocks their slots', () async {
     final (s, svc) = await liveSalon();
     await as('noor@salon.pk');
-    final staff = await salons.addStaff(s.id, name: 'Ayesha Malik', email: 'ayesha@salon.pk', phone: '0301 2223334', password: pw, title: 'Senior stylist');
+    final staff = await salons.addStaff(s.id, name: 'Ayesha Malik', phone: '0301 2223334', title: 'Senior stylist');
+    expect(staff.email, isEmpty);
     final b = salons.branches(s.id).single;
     // Two professionals → two free at 10:00.
     expect(bookings.availability(branchId: b.id, serviceIds: [svc.id], day: monday9).first.staffIds, hasLength(2));
-    await as('ayesha@salon.pk');
-    final l = await salons.requestLeave(from: monday9, to: monday9, reason: 'Family wedding');
-    await as('noor@salon.pk');
-    await salons.decideLeave(l.id, approve: true);
+    final l = await salons.requestLeave(staffId: staff.id, from: monday9, to: monday9, reason: 'Family wedding');
+    expect(l.status, 'APPROVED');
     expect(bookings.availability(branchId: b.id, serviceIds: [svc.id], day: monday9).first.staffIds, isNot(contains(staff.id)));
+    await salons.cancelLeave(l.id);
+    expect(bookings.availability(branchId: b.id, serviceIds: [svc.id], day: monday9).first.staffIds, contains(staff.id));
+    // Nobody can sign in as a team member, not even with an empty email.
+    await auth.signOut();
+    expect(() => auth.signIn('', ''), throwsA(isA<DomainError>()));
   });
 
   test('chat and complaints reach the other side', () async {
@@ -258,15 +279,33 @@ void main() {
     expect(() => field.submitReport(notes: ''), throwsA(isA<DomainError>()));
   });
 
-  test('training: officer schedules, staff enrol, seats enforced', () async {
+  test('training: salon enrols itself and its team, seats enforced, attendance gives certificates', () async {
     final (s, _) = await liveSalon();
-    final t = await field.saveTraining(title: 'Colour Mastery', description: '', location: 'HOLA Academy', at: DateTime(2026, 11, 5, 11), durationMin: 120, seats: 1);
+    final officer = auth.current!.id;
+    final t = await field.saveTraining(title: 'Colour Mastery', description: '', location: 'HOLA Academy', at: DateTime(2026, 11, 5, 11), durationMin: 120, seats: 2);
     await as('noor@salon.pk');
+    final owner = auth.current!.id;
     expect(engage.notifications().any((n) => n.title.startsWith('New training')), isTrue);
+    final ayesha = await salons.addStaff(s.id, name: 'Ayesha Malik', title: '');
+    final hamza = await salons.addStaff(s.id, name: 'Hamza Iqbal', title: '');
     await field.enrol(t.id);
-    await salons.addStaff(s.id, name: 'Ayesha', email: 'ayesha@salon.pk', phone: '0301 2223334', password: pw, title: '');
-    await as('ayesha@salon.pk');
-    expect(() => field.enrol(t.id), throwsA(isA<DomainError>()));
+    await field.enrol(t.id, personId: ayesha.id);
+    expect(field.training(t.id)!.enrolled, [owner, ayesha.id]);
+    expect(() => field.enrol(t.id, personId: hamza.id), throwsA(isA<DomainError>())); // full
+    await field.withdraw(t.id, personId: ayesha.id);
+    await field.enrol(t.id, personId: hamza.id);
+    // Another salon can't enrol someone else's team.
+    await signUp(Role.salonOwner, 'Rabia', 'rabia@salon.pk');
+    expect(() => field.enrol(t.id, personId: ayesha.id), throwsA(isA<DomainError>()));
+    await as('officer@hola.pk');
+    expect(auth.current!.id, officer);
+    clock = () => DateTime(2026, 11, 5, 14);
+    await field.completeTraining(t.id, [owner, hamza.id]);
+    await as('noor@salon.pk');
+    // One notice for the salon covers the team member who attended.
+    expect(engage.notifications().where((n) => n.title == 'Training completed'), hasLength(2));
+    expect(engage.notifications().any((n) => n.args['names'] == 'Hamza'), isTrue);
+    expect(field.training(t.id)!.attended, [owner, hamza.id]);
   });
 
   test('owner manages salon photos; the first is the cover; others cannot change them', () async {

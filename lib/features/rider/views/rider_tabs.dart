@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../../core/utils/clock.dart';
 import '../../../core/utils/format.dart';
-import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
@@ -22,66 +21,101 @@ class RiderToday extends StatelessWidget {
       ChangeNotifierProvider(create: (c) => DeliveriesViewModel(c.read<TradeRepository>(), c.read<SalonRepository>(), c.read<AuthRepository>()), child: const _Today());
 }
 
-class _Today extends StatelessWidget {
+class _Today extends StatefulWidget {
   const _Today();
+  @override
+  State<_Today> createState() => _TodayState();
+}
+
+class _TodayState extends State<_Today> {
+  String? _tab; // pick | way | done; first visit opens what needs doing
+
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<DeliveriesViewModel>();
-    Widget section(String title, List<TradeOrder> xs) => Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SizedBox(height: 24),
-        SecHead(title),
-        const SizedBox(height: 12),
-        VStack(gap: 12, [
-          for (final o in xs)
-            DeliveryCard(
-              o: o,
-              stop: vm.stop(o),
-              onTap: () => pushPage(context, DeliveryPage(id: o.id)),
-            ),
-        ]),
-      ],
-    );
+    final tab = _tab ?? (vm.outForDelivery.isNotEmpty ? 'way' : 'pick');
+    final list = switch (tab) {
+      'way' => vm.outForDelivery,
+      'done' => vm.done,
+      _ => vm.assigned,
+    };
     return BandView(
       role: 'rider',
+      onRefresh: vm.pull,
       children: [
         ...staggered([
-          TopHead(eyebrow: dLabel(today), title: tr('Deliveries'), actions: [NotificationBell()]),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: Kpi(tr('To deliver'), vm.toDeliver, hl: true)),
-              const SizedBox(width: 10),
-              Expanded(child: Kpi(tr('Delivered today'), vm.deliveredToday)),
-              const SizedBox(width: 10),
-              Expanded(child: Kpi(tr('Cash to collect, Rs'), vm.cashToCollect, format: (v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '${v.round()}')),
-            ],
+          TopHead(
+            eyebrow: '${tr('Deliveries')} · ${dLabel(today)}',
+            title: tr('{greeting}, {name}', {
+              'greeting': now().hour < 12
+                  ? tr('Good morning')
+                  : now().hour < 17
+                  ? tr('Good afternoon')
+                  : tr('Good evening'),
+              'name': vm.firstName,
+            }),
+            sub: tr('Orders HOLA assigned to you'),
+            actions: [NotificationBell()],
           ),
+          const SizedBox(height: 18),
         ]),
-        const BandMark(),
-        if (vm.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 24),
-            child: HCard(
-              child: EmptyState(icon: 'truck', title: tr('No deliveries assigned yet'), text: tr('HOLA assigns trade orders to you. They will appear here, and you will get a notification.')),
-            ),
-          )
-        else ...[
-          // Nothing to do now: say so first, then show the history.
-          if (vm.toDeliver == 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 24),
-              child: HCard(
-                child: EmptyState(icon: 'check', title: tr('All caught up'), text: tr('Nothing left to deliver right now. New orders appear here with a notification.')),
+        // The numbers sit across the header's edge.
+        BandMark(
+          child: Reveal(
+            i: 1,
+            child: KpiRow([
+              Kpi(tr('To pick up'), vm.assigned.length, hl: true),
+              Kpi(tr('On the way'), vm.outForDelivery.length),
+              Kpi(tr('Cash to collect, Rs'), vm.cashToCollect, format: (v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '${v.round()}'),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 18),
+        ...staggered([
+          Seg(
+            opts: [
+              ('pick', '${tr('To pick up')}${vm.assigned.isEmpty ? '' : ' · ${vm.assigned.length}'}'),
+              ('way', '${tr('On the way')}${vm.outForDelivery.isEmpty ? '' : ' · ${vm.outForDelivery.length}'}'),
+              ('done', tr('Done')),
+            ],
+            value: tab,
+            onChanged: (v) => setState(() => _tab = v),
+          ),
+          const SizedBox(height: 16),
+          if (list.isEmpty)
+            HCard(
+              child: switch (tab) {
+                'way' => EmptyState(icon: 'truck', title: tr('Nothing on the way'), text: tr('Pick up an order from HOLA, then tap Picked up. It moves here with directions to the salon.')),
+                'done' => EmptyState(icon: 'check', title: tr('No deliveries this week'), text: tr('Delivered orders from the last 7 days are listed here.')),
+                _ =>
+                  vm.isEmpty
+                      ? EmptyState(icon: 'box', title: tr('No deliveries assigned yet'), text: tr('HOLA assigns trade orders to you. They will appear here, and you will get a notification.'))
+                      : EmptyState(icon: 'check', title: tr('All picked up'), text: tr('No orders waiting at HOLA for you right now.')),
+              },
+            )
+          else
+            for (final o in list)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Builder(
+                  builder: (context) {
+                    final stop = vm.stop(o);
+                    return DeliveryCard(
+                      o: o,
+                      stop: stop,
+                      onTap: () => pushPage(context, DeliveryPage(id: o.id)),
+                      onCall: stop.phone.isEmpty ? null : () => callPhone(stop.phone),
+                      onPickUp: () async {
+                        final ok = await attempt(() => vm.pickUp(o), success: tr('Picked up. Tap Start navigation to go'), icon: 'truck');
+                        if (ok) setState(() => _tab = 'way');
+                      },
+                      onNavigate: () => navigateTo(stop),
+                      collect: vm.collectFor(o),
+                    );
+                  },
+                ),
               ),
-            ),
-          if (vm.outForDelivery.isNotEmpty) Reveal(i: 3, child: section(tr('On the way'), vm.outForDelivery)),
-          if (vm.assigned.isNotEmpty) Reveal(i: 4, child: section(tr('Up next'), vm.assigned)),
-          if (vm.failed.isNotEmpty) Reveal(i: 5, child: section(tr("Couldn't deliver"), vm.failed)),
-          if (vm.delivered.isNotEmpty) Reveal(i: 6, child: section(tr('Delivered this week'), vm.delivered)),
-        ],
+        ], 2),
       ],
     );
   }
@@ -104,6 +138,7 @@ class _Cash extends StatelessWidget {
     const w = TextStyle(color: Colors.white);
     return BandView(
       role: 'rider',
+      onRefresh: vm.pull,
       children: [
         ...staggered([
           TopHead(title: tr('Cash'), sub: tr('Cash on delivery money you are carrying')),
@@ -125,7 +160,10 @@ class _Cash extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 CountUp(vm.total, format: rs, style: T.display(context).merge(w)),
-                Text(hand.isEmpty ? tr('Nothing to hand over') : tr('From {deliveries}', {'deliveries': plural(hand.length, 'delivery', 'deliveries')}), style: T.cap(context).merge(w.copyWith(color: Colors.white70))),
+                Text(
+                  hand.isEmpty ? tr('Nothing to hand over') : tr('From {deliveries}', {'deliveries': plural(hand.length, 'delivery', 'deliveries')}),
+                  style: T.cap(context).merge(w.copyWith(color: Colors.white70)),
+                ),
               ],
             ),
           ),
@@ -136,13 +174,16 @@ class _Cash extends StatelessWidget {
           if (hand.isNotEmpty) ...[
             Group(
               children: [
-                for (final o in hand)
+                for (final p in hand)
                   MRow(
-                    icon: 'box',
-                    title: vm.salonName(o.salonId),
-                    sub: '${o.code} · ${o.recipientName ?? ''}',
+                    icon: p.creditPayment ? 'doc' : 'box',
+                    title: p.salonName.isNotEmpty ? p.salonName : (vm.salonFor(p.orderCode).isEmpty ? (p.creditPayment ? p.requestCode : p.orderCode) : vm.salonFor(p.orderCode)),
+                    sub: [
+                      if (p.creditPayment) tr('Credit payment {code}', {'code': p.requestCode}) else if (p.salonName.isNotEmpty || vm.salonFor(p.orderCode).isNotEmpty) p.orderCode,
+                      if (p.receivedAt case final at?) '${dayLabel(at, today)} ${fmtTime(at)}',
+                    ].join(' · '),
                     trailing: Text(
-                      rs(o.cashCollected ?? 0),
+                      rs(p.amount),
                       style: T.sm(context).copyWith(color: c.ink, fontWeight: FontWeight.w700),
                     ),
                   ),

@@ -26,25 +26,42 @@ class OptionTile extends StatelessWidget {
           border: Border.all(color: on ? c.brand : Colors.transparent, width: 2),
           boxShadow: on ? c.liftHi : c.lift,
         ),
-        child: Row(children: [
-          if (leading != null) ...[leading!, const SizedBox(width: 12)] else if (icon != null) ...[
-            Container(width: 40, height: 40, decoration: BoxDecoration(color: c.brandSoft, shape: BoxShape.circle), alignment: Alignment.center, child: HIcon(icon!, size: 20, color: c.brandText)),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: T.ttl(context)),
-              if (sub != null) Text(sub!, style: T.sm(context).copyWith(color: c.muted)),
-            ]),
-          ),
-          trailing ??
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: on ? c.brand : c.line, width: on ? 7 : 2)),
+        child: Row(
+          children: [
+            if (leading != null) ...[
+              leading!,
+              const SizedBox(width: 12),
+            ] else if (icon != null) ...[
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: c.brandSoft, shape: BoxShape.circle),
+                alignment: Alignment.center,
+                child: HIcon(icon!, size: 20, color: c.brandText),
               ),
-        ]),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: T.ttl(context)),
+                  if (sub != null) Text(sub!, style: T.sm(context).copyWith(color: c.muted)),
+                ],
+              ),
+            ),
+            trailing ??
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: on ? c.brand : c.line, width: on ? 7 : 2),
+                  ),
+                ),
+          ],
+        ),
       ),
     );
   }

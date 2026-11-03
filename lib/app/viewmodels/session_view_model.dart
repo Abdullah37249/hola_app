@@ -23,6 +23,7 @@ class SessionViewModel extends ViewModel {
 
   Future<void> init() async {
     await _auth.init();
+    await _prefs.init();
     Sfx.enabled = _prefs.sound;
     L10n.lang.value = _prefs.language;
     _lastAccountId = _auth.current?.id;
@@ -43,19 +44,27 @@ class SessionViewModel extends ViewModel {
   bool get signedIn => account != null;
 
   String get rk => switch (account?.role) {
-        Role.salonOwner => 'salon',
-        Role.salonStaff => 'sstaff',
-        Role.salesOfficer => 'field',
-        Role.rider => 'rider',
-        _ => 'customer',
-      };
+    Role.salonOwner || Role.salonStaff => 'salon',
+    Role.salesOfficer => 'field',
+    Role.rider => 'rider',
+    Role.trainer => 'trainer',
+    _ => 'customer',
+  };
 
   /// A salon owner who hasn't created their salon yet goes through set-up first.
   bool get needsSalonSetup => account?.role == Role.salonOwner && account?.salonId == null;
 
-  ThemeMode get themeMode => switch (_prefs.theme) { 'dark' => ThemeMode.dark, 'system' => ThemeMode.system, _ => ThemeMode.light };
+  ThemeMode get themeMode => switch (_prefs.theme) {
+    'light' => ThemeMode.light,
+    'system' => ThemeMode.system,
+    _ => ThemeMode.dark,
+  };
   void setTheme(ThemeMode m) {
-    _prefs.theme = switch (m) { ThemeMode.dark => 'dark', ThemeMode.system => 'system', _ => 'light' };
+    _prefs.theme = switch (m) {
+      ThemeMode.dark => 'dark',
+      ThemeMode.system => 'system',
+      _ => 'light',
+    };
     notify();
   }
 
@@ -65,6 +74,10 @@ class SessionViewModel extends ViewModel {
     L10n.lang.value = code;
     notify();
   }
+
+  /// The one-time permissions screen still has to be shown.
+  bool get needsPermissionsIntro => signedIn && !_prefs.permissionsAsked;
+  void permissionsIntroShown() => _prefs.permissionsAsked = true;
 
   bool get sound => Sfx.enabled;
   set sound(bool v) {

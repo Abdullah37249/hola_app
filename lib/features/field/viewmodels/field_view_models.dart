@@ -1,6 +1,7 @@
 import '../../../core/l10n/l10n.dart';
 import '../../../core/mvvm/repo_view_model.dart';
 import '../../../core/utils/clock.dart';
+import '../../../core/utils/location.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 
@@ -62,7 +63,13 @@ class FieldSalonsViewModel extends RepoViewModel with FieldLookups {
   @override
   final AuthRepository auth;
 
-  static List<(String, String)> get filters => [('all', tr('All')), (SalonStatus.pending, tr('To verify')), (SalonStatus.active, tr('Verified')), (SalonStatus.changes, tr('Changes requested')), (SalonStatus.suspended, tr('Suspended'))];
+  static List<(String, String)> get filters => [
+    ('all', tr('All')),
+    (SalonStatus.pending, tr('To verify')),
+    (SalonStatus.active, tr('Verified')),
+    (SalonStatus.changes, tr('Changes requested')),
+    (SalonStatus.suspended, tr('Suspended')),
+  ];
   String filter = 'all';
   String query = '';
 
@@ -190,7 +197,8 @@ class VisitViewModel extends RepoViewModel with FieldLookups {
     };
   }
 
-  Future<void> checkIn() => field.checkIn(id);
+  /// Checks in with a GPS reading when the phone can give one.
+  Future<void> checkIn() async => field.checkIn(id, where: await Location.read());
   Future<void> cancel() => field.cancelVisit(id);
   Future<void> complete() => field.completeVisit(id, outcomes: outcomes.toList(), notes: notes, followUpAt: followUpAt);
 }
@@ -205,7 +213,13 @@ class FieldOrdersViewModel extends RepoViewModel with FieldLookups {
   final AuthRepository auth;
   final TradeRepository trade;
 
-  static List<(String, String)> get filters => [('approve', tr('Needs approval')), ('dispatch', tr('To dispatch')), ('delivery', tr('In delivery')), ('delivered', tr('Delivered')), ('all', tr('All'))];
+  static List<(String, String)> get filters => [
+    ('approve', tr('Needs approval')),
+    ('dispatch', tr('To dispatch')),
+    ('delivery', tr('In delivery')),
+    ('delivered', tr('Delivered')),
+    ('all', tr('All')),
+  ];
   String filter = 'all';
 
   void setFilter(String f) {
@@ -214,12 +228,12 @@ class FieldOrdersViewModel extends RepoViewModel with FieldLookups {
   }
 
   bool _match(TradeOrder o, String f) => switch (f) {
-        'approve' => o.status == OrderStatus.placed || o.status == OrderStatus.underReview,
-        'dispatch' => o.status == OrderStatus.approved || o.status == OrderStatus.failed,
-        'delivery' => o.status == OrderStatus.dispatched || o.status == OrderStatus.outForDelivery,
-        'delivered' => o.status == OrderStatus.delivered || o.status == OrderStatus.confirmed,
-        _ => true,
-      };
+    'approve' => o.status == OrderStatus.placed || o.status == OrderStatus.underReview,
+    'dispatch' => o.status == OrderStatus.approved || o.status == OrderStatus.failed,
+    'delivery' => o.status == OrderStatus.dispatched || o.status == OrderStatus.outForDelivery,
+    'delivered' => o.status == OrderStatus.delivered || o.status == OrderStatus.confirmed,
+    _ => true,
+  };
 
   List<TradeOrder> get all => trade.allOrders();
   int count(String f) => all.where((o) => _match(o, f)).length;
@@ -236,7 +250,9 @@ class FieldOrdersViewModel extends RepoViewModel with FieldLookups {
 // ─── More: training, performance, daily report ───────────────────────────────
 
 class TrainingsViewModel extends RepoViewModel with FieldLookups {
-  TrainingsViewModel({required this.salons, required this.auth, required this.field}) : super(field);
+  TrainingsViewModel({required this.salons, required this.auth, required this.field}) : super(field) {
+    field.syncTrainings();
+  }
   @override
   final SalonRepository salons;
   @override

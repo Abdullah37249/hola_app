@@ -31,13 +31,20 @@ class _Notifications extends StatelessWidget {
       alwaysTitle: false,
       trailing: vm.unread == 0
           ? null
-          : IconBtn('check', raised: true, onTap: () => attempt(vm.markAllRead, success: tr('All marked as read'), icon: 'check')),
+          : IconBtn(
+              'check',
+              raised: true,
+              onTap: () => attempt(vm.markAllRead, success: tr('All marked as read'), icon: 'check'),
+            ),
       children: [
         Reveal(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(tr('Notifications'), style: T.h1(context)),
-            Text(vm.unread == 0 ? tr("You're all caught up") : plural(vm.unread, 'unread update'), style: T.sm(context).copyWith(color: context.c.muted)),
-          ]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(tr('Notifications'), style: T.h1(context)),
+              Text(vm.unread == 0 ? tr("You're all caught up") : plural(vm.unread, 'unread update'), style: T.sm(context).copyWith(color: context.c.muted)),
+            ],
+          ),
         ),
         const SizedBox(height: 20),
         if (vm.all.isEmpty)
@@ -58,20 +65,25 @@ class _Section extends StatelessWidget {
   const _Section(this.title, this.items, this.vm);
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 18),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(padding: const EdgeInsets.fromLTRB(4, 0, 0, 8), child: Text(title.toUpperCase(), style: T.eyebrow(context))),
-          HCard(
-            padding: EdgeInsets.zero,
-            child: Column(children: [
-              for (var i = 0; i < items.length; i++) ...[
-                if (i > 0) Divider(height: 1, indent: 64, color: context.c.line),
-                Reveal(i: i, child: _Row(items[i], vm)),
-              ],
-            ]),
+    padding: const EdgeInsets.only(bottom: 18),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
+          child: Text(title.toUpperCase(), style: T.eyebrow(context)),
+        ),
+        HCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[if (i > 0) Divider(height: 1, indent: 64, color: context.c.line), Reveal(i: i, child: _Row(items[i], vm))],
+            ],
           ),
-        ]),
-      );
+        ),
+      ],
+    ),
+  );
 }
 
 class _Row extends StatelessWidget {
@@ -89,31 +101,58 @@ class _Row extends StatelessWidget {
       },
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(color: n.read ? c.bg2 : c.brandSoft, borderRadius: BorderRadius.circular(12)),
-            alignment: Alignment.center,
-            child: HIcon(_icon(n.icon), size: 19, color: n.read ? c.muted : c.brandText),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: Text(tr(n.title, n.args), style: T.ttl(context).copyWith(fontWeight: n.read ? FontWeight.w500 : FontWeight.w600, color: n.read ? c.body : c.ink))),
-                const SizedBox(width: 8),
-                Padding(padding: const EdgeInsets.only(top: 2), child: Text(ago(n.at, now()), style: T.cap(context).copyWith(color: c.subtle))),
-              ]),
-              const SizedBox(height: 2),
-              Text(tr(n.body, n.args), maxLines: 3, overflow: TextOverflow.ellipsis, style: T.sm(context).copyWith(color: c.muted)),
-            ]),
-          ),
-          if (!n.read) ...[
-            const SizedBox(width: 8),
-            Container(margin: const EdgeInsets.only(top: 6), width: 9, height: 9, decoration: BoxDecoration(color: c.brand, shape: BoxShape.circle)),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(color: n.read ? c.bg2 : c.brandSoft, borderRadius: BorderRadius.circular(12)),
+              alignment: Alignment.center,
+              child: HIcon(_icon(n.icon), size: 19, color: n.read ? c.muted : c.brandText),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          tr(n.title, n.args),
+                          style: T.ttl(context).copyWith(fontWeight: n.read ? FontWeight.w500 : FontWeight.w600, color: n.read ? c.body : c.ink),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(ago(n.at, now()), style: T.cap(context).copyWith(color: c.subtle)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    tr(n.body, n.args),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: T.sm(context).copyWith(color: c.muted),
+                  ),
+                ],
+              ),
+            ),
+            if (!n.read) ...[
+              const SizedBox(width: 8),
+              Container(
+                margin: const EdgeInsets.only(top: 6),
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(color: c.brand, shape: BoxShape.circle),
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }

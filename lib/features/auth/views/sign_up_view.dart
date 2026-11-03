@@ -7,6 +7,7 @@ import '../../../core/utils/sfx.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
+import '../../../shared/widgets/gps_capture.dart';
 import '../../../shared/widgets/ui.dart';
 import '../viewmodels/auth_view_models.dart';
 import '../../legal/views/legal_page.dart';
@@ -22,8 +23,6 @@ class SignUpView extends StatelessWidget {
 Map<Role, (String, String)> get _roleInfo => {
   Role.customer: ('user', tr('Book appointments at salons near you, keep favourites and review your visits.')),
   Role.salonOwner: ('store', tr('List your salon, manage bookings, your team, menu and HOLA trade orders.')),
-  Role.salesOfficer: ('chart', tr('HOLA team: verify salons, plan visits, run training and take trade orders.')),
-  Role.rider: ('truck', tr('HOLA team: deliver trade orders, collect proof of delivery and cash.')),
 };
 
 class _SignUp extends StatefulWidget {
@@ -34,12 +33,14 @@ class _SignUp extends StatefulWidget {
 
 class _SignUpState extends State<_SignUp> {
   final name = TextEditingController(), email = TextEditingController(), phone = TextEditingController(), city = TextEditingController();
+  final salonName = TextEditingController(), address = TextEditingController(), area = TextEditingController();
   final errors = FieldErrors();
   int step = 0;
+  GeoFix? gps; // the salon's door, captured with its address
 
   @override
   void dispose() {
-    for (final c in [name, email, phone, city]) {
+    for (final c in [name, email, phone, city, salonName, address, area]) {
       c.dispose();
     }
     errors.dispose();
@@ -50,7 +51,13 @@ class _SignUpState extends State<_SignUp> {
     FocusScope.of(context).unfocus();
     final nav = Navigator.of(context);
     final ok = await attempt(
-      () => vm.submit(name: name.text, email: email.text, phone: phone.text, city: city.text),
+      () => vm.submit(
+        name: name.text,
+        email: email.text,
+        phone: phone.text,
+        city: city.text,
+        salon: vm.role == Role.salonOwner ? SalonDraft(name: salonName.text, address: address.text, area: area.text, location: gps) : null,
+      ),
       errors: errors,
     );
     if (!ok) return;
@@ -112,7 +119,11 @@ class _SignUpState extends State<_SignUp> {
         const SizedBox(height: 10),
       ],
       const SizedBox(height: 8),
-      HButton(vm.role == null ? tr("Choose how you'll use HOLA") : tr('Continue as {role}', {'role': vm.role!.label.toLowerCase()}), block: true, onTap: vm.role == null ? null : () => setState(() => step = 1)),
+      HButton(
+        vm.role == null ? tr("Choose how you'll use HOLA") : tr('Continue as {role}', {'role': vm.role!.label.toLowerCase()}),
+        block: true,
+        onTap: vm.role == null ? null : () => setState(() => step = 1),
+      ),
     ],
   );
 
@@ -120,8 +131,26 @@ class _SignUpState extends State<_SignUp> {
     key: const ValueKey('details'),
     child: AuthCard(
       children: [
-        HField(label: tr('Full name'), icon: 'user', hint: tr('e.g. Mariam Siddiqui'), controller: name, caps: TextCapitalization.words, autofill: const [AutofillHints.name], name: 'name', errors: errors),
-        HField(label: tr('Email'), icon: 'mail', hint: tr('you@example.com'), controller: email, keyboard: TextInputType.emailAddress, autofill: const [AutofillHints.email], name: 'email', errors: errors),
+        HField(
+          label: tr('Full name'),
+          icon: 'user',
+          hint: tr('e.g. Mariam Siddiqui'),
+          controller: name,
+          caps: TextCapitalization.words,
+          autofill: const [AutofillHints.name],
+          name: 'name',
+          errors: errors,
+        ),
+        HField(
+          label: tr('Email'),
+          icon: 'mail',
+          hint: tr('you@example.com'),
+          controller: email,
+          keyboard: TextInputType.emailAddress,
+          autofill: const [AutofillHints.email],
+          name: 'email',
+          errors: errors,
+        ),
         HField(
           label: tr('Phone'),
           icon: 'phone',
@@ -133,7 +162,23 @@ class _SignUpState extends State<_SignUp> {
           name: 'phone',
           errors: errors,
         ),
+        // A salon goes live on HOLA straight away, so it needs its name and address now.
+        if (vm.role == Role.salonOwner) ...[
+          HField(label: tr('Salon name'), icon: 'store', hint: tr('e.g. Maison Noor'), controller: salonName, caps: TextCapitalization.words, name: 'salonName', errors: errors),
+          HField(
+            label: tr('Street address'),
+            icon: 'pin',
+            hint: tr('e.g. 12-B Main Boulevard'),
+            controller: address,
+            caps: TextCapitalization.words,
+            autofill: const [AutofillHints.streetAddressLine1],
+            name: 'address',
+            errors: errors,
+          ),
+          HField(label: tr('Area'), icon: 'pin', hint: tr('e.g. Gulberg III'), controller: area, caps: TextCapitalization.words, name: 'area', errors: errors),
+        ],
         HField(label: tr('City'), icon: 'pin', hint: tr('e.g. Lahore'), controller: city, caps: TextCapitalization.words, autofill: const [AutofillHints.addressCity], name: 'city', errors: errors),
+        if (vm.role == Role.salonOwner) GpsCapture(value: gps, onChanged: (v) => setState(() => gps = v)),
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

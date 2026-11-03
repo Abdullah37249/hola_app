@@ -9,6 +9,7 @@ import 'package:hola_professional/core/utils/photo_files.dart';
 import 'package:hola_professional/core/theme/icons.dart';
 import 'package:hola_professional/core/utils/sfx.dart';
 import 'package:hola_professional/core/theme/theme.dart';
+import 'glow.dart';
 import 'palette.dart';
 import '../../domain/entities/status.dart';
 
@@ -16,6 +17,7 @@ export 'package:hola_professional/core/l10n/l10n.dart';
 export 'package:hola_professional/core/theme/icons.dart';
 export 'package:hola_professional/core/theme/theme.dart';
 export 'fx.dart';
+export 'glow.dart';
 export 'states.dart';
 
 // ───────────────────────── motion ─────────────────────────
@@ -146,6 +148,22 @@ class _HButtonState extends State<HButton> with SingleTickerProviderStateMixin {
     // No looping shine: calmer, and no idle animation cost.
   }
 
+  /// The page this button is on, looked up while the button is active (never
+  /// from the timer: a button on a closing sheet must not look anything up).
+  ModalRoute<Object?>? _route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
+
+  @override
+  void deactivate() {
+    _spinCheck?.cancel();
+    super.deactivate();
+  }
+
   @override
   void dispose() {
     _spinCheck?.cancel();
@@ -164,7 +182,7 @@ class _HButtonState extends State<HButton> with SingleTickerProviderStateMixin {
     // busy (no double opens) without a spinner showing behind it.
     _spinCheck = Timer.periodic(const Duration(milliseconds: 150), (_) {
       if (!mounted || !_busy) return;
-      final front = ModalRoute.of(context)?.isCurrent ?? true;
+      final front = _route?.isCurrent ?? true;
       if (front != _spin) setState(() => _spin = front);
     });
     try {
@@ -187,7 +205,7 @@ class _HButtonState extends State<HButton> with SingleTickerProviderStateMixin {
       case BtnKind.primary:
         g = G.btn;
         fg = Colors.white;
-        sh = const [BoxShadow(color: Color(0xBF005BAC), blurRadius: 22, spreadRadius: -10, offset: Offset(0, 10))];
+        sh = const [BoxShadow(color: Color(0xCC2F80FF), blurRadius: 26, spreadRadius: -8, offset: Offset(0, 8))];
       case BtnKind.secondary:
         bg = c.surface;
         fg = c.brandText;
@@ -257,7 +275,7 @@ class _HButtonState extends State<HButton> with SingleTickerProviderStateMixin {
                   ? 10
                   : 20,
             ),
-            decoration: BoxDecoration(gradient: g, color: bg, borderRadius: BorderRadius.circular(14), boxShadow: disabled ? null : sh, border: border),
+            decoration: BoxDecoration(gradient: g, color: bg, borderRadius: BorderRadius.circular(h / 2), boxShadow: disabled ? null : sh, border: border),
             clipBehavior: Clip.antiAlias,
             child: Stack(
               alignment: Alignment.center,
@@ -404,7 +422,14 @@ class HCard extends StatelessWidget {
         gradient: gradient,
         borderRadius: BorderRadius.circular(radius),
         boxShadow: shadow ?? context.c.lift,
-        border: border ?? (gradient == null && !context.c.dark ? Border.all(color: context.c.line.withValues(alpha: .7), width: .6) : null),
+        border:
+            border ??
+            (gradient == null
+                ? Border.all(
+                    color: context.c.line.withValues(alpha: context.c.dark ? 1 : .7),
+                    width: context.c.dark ? .8 : .6,
+                  )
+                : null),
       ),
       clipBehavior: Clip.antiAlias,
       child: child,
@@ -516,19 +541,21 @@ class HChip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         height: 36,
         padding: const EdgeInsets.symmetric(horizontal: 14),
+        // Night: selected is the poster's white pill with dark type. Light: brand blue.
         decoration: BoxDecoration(
-          gradient: on ? G.btn : null,
-          color: on ? null : c.surface,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: on ? const [BoxShadow(color: Color(0xB3005BAC), blurRadius: 18, spreadRadius: -8, offset: Offset(0, 8))] : c.lift,
+          gradient: on && !c.dark ? G.btn : null,
+          color: on ? (c.dark ? Colors.white : null) : c.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: on ? null : Border.all(color: c.line),
+          boxShadow: on ? [BoxShadow(color: c.dark ? const Color(0x806FB0FF) : const Color(0xB32F80FF), blurRadius: 18, spreadRadius: -8, offset: const Offset(0, 6))] : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null) ...[HIcon(icon!, size: 16, color: on ? Colors.white : c.ink), const SizedBox(width: 6)],
+            if (icon != null) ...[HIcon(icon!, size: 16, color: on ? (c.dark ? c.night : Colors.white) : c.ink), const SizedBox(width: 6)],
             Text(
               label,
-              style: TextStyle(fontFamily: T.f, fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: on ? Colors.white : c.ink),
+              style: TextStyle(fontFamily: T.f, fontSize: 14, height: 20 / 14, fontWeight: on ? FontWeight.w700 : FontWeight.w500, color: on ? (c.dark ? c.night : Colors.white) : c.ink),
             ),
           ],
         ),
@@ -587,7 +614,7 @@ class Seg extends StatelessWidget {
                       gradient: onBand ? null : G.btn,
                       color: onBand ? Colors.white : null,
                       borderRadius: BorderRadius.circular(10),
-                      boxShadow: const [BoxShadow(color: Color(0xB3005BAC), blurRadius: 14, spreadRadius: -6, offset: Offset(0, 6))],
+                      boxShadow: const [BoxShadow(color: Color(0xB32F80FF), blurRadius: 14, spreadRadius: -6, offset: Offset(0, 6))],
                     ),
                   ),
                 ),
@@ -646,11 +673,7 @@ class HSwitch extends StatelessWidget {
       width: 50,
       height: 30,
       padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        gradient: on ? const LinearGradient(colors: [Color(0xFF2588E8), Color(0xFF005BAC)]) : null,
-        color: on ? null : context.c.line,
-        borderRadius: BorderRadius.circular(15),
-      ),
+      decoration: BoxDecoration(gradient: on ? G.btn : null, color: on ? null : context.c.line, borderRadius: BorderRadius.circular(15)),
       child: AnimatedAlign(
         duration: const Duration(milliseconds: 300),
         curve: kSpring,
@@ -1155,6 +1178,8 @@ class SalonArt extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = pal[p % pal.length].map(Color.new).toList();
     final file = PhotoFiles.file(photo);
+    final url = photo != null && photo!.startsWith('https://') ? photo : null; // HOLA salons: public photo links
+    Widget fade(BuildContext _, Widget child, int? frame, bool sync) => sync ? child : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 300), child: child);
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
@@ -1165,19 +1190,15 @@ class SalonArt extends StatelessWidget {
             CustomPaint(painter: _ArtPainter(cs[0], cs[1], cs[2], n)),
             if (file != null)
               // Fades in over the artwork once decoded; the artwork stays as the fallback.
-              Image.file(
-                file,
-                fit: BoxFit.cover,
-                cacheWidth: 1200,
-                frameBuilder: (_, child, frame, sync) => sync ? child : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 300), child: child),
-                errorBuilder: (_, __, ___) => const SizedBox(),
-              )
+              Image.file(file, fit: BoxFit.cover, cacheWidth: 1200, frameBuilder: fade, errorBuilder: (_, __, ___) => const SizedBox())
+            else if (url != null)
+              Image.network(url, fit: BoxFit.cover, cacheWidth: 1200, frameBuilder: fade, errorBuilder: (_, __, ___) => const SizedBox())
             else if (name != null && name!.trim().isNotEmpty)
               LayoutBuilder(
                 builder: (_, k) => Center(
                   child: Text(
                     initials(name!).toUpperCase(),
-                    style: TextStyle(fontFamily: T.serif, fontSize: (k.biggest.shortestSide * .42).clamp(14, 72), height: 1, color: Colors.white.withValues(alpha: .92), letterSpacing: 1),
+                    style: TextStyle(fontFamily: T.head, fontSize: (k.biggest.shortestSide * .42).clamp(14, 72), height: 1, color: Colors.white.withValues(alpha: .92), letterSpacing: 1),
                   ),
                 ),
               ),
@@ -1379,6 +1400,29 @@ class HProgress extends StatelessWidget {
 
 // ───────────────────────── sheets ─────────────────────────
 
+/// Creates [V] once and disposes it only when this widget leaves the tree,
+/// so a sheet's controller lives through its closing animation.
+class Owned<V> extends StatefulWidget {
+  final V Function() create;
+  final void Function(V) dispose;
+  final Widget Function(BuildContext, V) builder;
+  const Owned({super.key, required this.create, required this.dispose, required this.builder});
+  @override
+  State<Owned<V>> createState() => _OwnedState<V>();
+}
+
+class _OwnedState<V> extends State<Owned<V>> {
+  late final V value = widget.create();
+  @override
+  void dispose() {
+    widget.dispose(value);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, value);
+}
+
 /// Bottom sheet with grab handle, blur backdrop and 26px top radius.
 Future<R?> showHSheet<R>(BuildContext context, Widget Function(BuildContext) builder) {
   Sfx.sheet();
@@ -1434,77 +1478,165 @@ class SheetHead extends StatelessWidget {
 
 // ───────────────────────── page scaffolds ─────────────────────────
 
-/// Animated gradient band behind tab views (floating blurred blobs + wave edge).
-class Band extends StatefulWidget {
+/// Every tab screen's header is this tall below the status bar, so the band is
+/// the same size on all screens (customer, salon and the rest).
+const kBandBody = 250.0;
+
+/// The salon Today header (greeting + number cards across the edge), below
+/// the status bar. Every screen with a [BandMark.match] container is padded to
+/// end its header exactly here, so customer and salon headers are one size.
+const kTodayBand = 190.0;
+
+/// The header band: a royal-blue sky crossed by fine lines of light that
+/// meet in a soft glow, an orange HOLA dot, and a double wave into the page.
+class Band extends StatelessWidget {
   final String role;
   final double height;
   const Band({super.key, required this.role, this.height = 290});
   @override
-  State<Band> createState() => _BandState();
+  Widget build(BuildContext context) => SizedBox(
+    height: height,
+    width: double.infinity,
+    child: CustomPaint(
+      painter: HolaSkyPainter(page: context.c.bg, dark: context.c.dark),
+    ),
+  );
 }
 
-class _BandState extends State<Band> {
+/// Paints the HOLA header (see [Band]). [page] is the colour below the wave.
+class HolaSkyPainter extends CustomPainter {
+  final Color page;
+  final bool dark;
+  HolaSkyPainter({required this.page, this.dark = false});
+
+  static const _top = Color(0xFF083C8D), _mid = Color(0xFF062D6A), _low = Color(0xFF051742);
+  static const wave = 48.0; // depth of the wave area at the bottom
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final w = s.width, h = s.height;
+    final rect = Offset.zero & s;
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, 0, w, h + 2));
+    // Sky: bright royal blue fading to deep navy.
+    canvas.drawRect(rect, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [_top, _mid, _low], stops: [0, .55, 1]).createShader(rect));
+
+    // Where the lines meet, with a soft glow.
+    final f = Offset(w * .8, (h - wave) * .42);
+    canvas.drawCircle(
+      f,
+      w * .42,
+      Paint()..shader = RadialGradient(colors: [Colors.white.withValues(alpha: .10), Colors.white.withValues(alpha: 0)]).createShader(Rect.fromCircle(center: f, radius: w * .42)),
+    );
+    // A wide wash of light behind the right side.
+    final wash = Offset(w * .95, h * .2);
+    canvas.drawCircle(
+      wash,
+      w * .55,
+      Paint()
+        ..shader = RadialGradient(colors: [const Color(0xFF6FA8FF).withValues(alpha: .16), const Color(0xFF6FA8FF).withValues(alpha: 0)]).createShader(Rect.fromCircle(center: wash, radius: w * .55)),
+    );
+
+    Paint line(double a, double width) => Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..color = Colors.white.withValues(alpha: a);
+    Paint halo(double a) => line(a, 5)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+
+    // 1. A large circle whose left edge runs down through the meeting point.
+    final r1 = w * .62;
+    final c1 = Offset(f.dx + r1, f.dy + r1 * .06);
+    canvas.drawCircle(c1, r1, halo(.07));
+    canvas.drawCircle(c1, r1, line(.34, 1.1));
+    // 2. A second, fainter circle sweeping in from the top.
+    final c2 = Offset(w * 1.08, -h * .32);
+    final r2 = (f - c2).distance;
+    canvas.drawCircle(c2, r2, line(.2, 1));
+    // 3. Two long rays through the meeting point.
+    void ray(double deg, double a) {
+      final d = Offset.fromDirection(deg * math.pi / 180);
+      canvas.drawLine(f - d * w * 2, f + d * w * 2, line(a, 1));
+    }
+
+    ray(-31, .22);
+    // The meeting point itself.
+    canvas.drawCircle(
+      f,
+      2.5,
+      Paint()
+        ..color = Colors.white.withValues(alpha: .55)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
+    );
+
+    // The orange HOLA dot, sitting on the big circle below the meeting point.
+    final dotAngle = math.pi - .22;
+    final dot = c1 + Offset.fromDirection(dotAngle, r1);
+    canvas.drawCircle(dot, 6.5, Paint()..color = const Color(0xFFFF8A00));
+    canvas.drawCircle(
+      dot,
+      12,
+      Paint()
+        ..color = const Color(0xFFFF8A00).withValues(alpha: .25)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+
+    // Double wave: a translucent ribbon, then the page in front of it.
+    Path waveAt(double lift) {
+      final b = h - wave - lift;
+      return Path()
+        ..moveTo(0, b + wave * .08)
+        ..cubicTo(w * .02, b + wave * .62, w * .1, b + wave * .78, w * .24, b + wave * .86)
+        ..cubicTo(w * .42, b + wave * .98, w * .6, b + wave * .9, w * .76, b + wave * .66)
+        ..cubicTo(w * .86, b + wave * .52, w * .94, b + wave * .54, w, b + wave * .6)
+        ..lineTo(w, h + 2)
+        ..lineTo(0, h + 2)
+        ..close();
+    }
+
+    canvas.drawPath(waveAt(14), Paint()..color = (dark ? const Color(0xFF7FA6E8) : Colors.white).withValues(alpha: dark ? .22 : .38));
+    canvas.drawPath(waveAt(0), Paint()..color = page);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(HolaSkyPainter o) => o.page != page || o.dark != dark;
+}
+
+/// Marks the container that sits across the header's wave edge (summary
+/// numbers, search bar, credit card…). The band ends through its middle, so
+/// it always sits half on the blue and half on the page. Place it as a direct
+/// child of the view's list (not inside a [Reveal]).
+///
+/// With [match], the container is pushed down so the header ends exactly at
+/// [kTodayBand], the salon Today height, on every screen that uses it.
+class BandMark extends StatelessWidget {
+  final Widget? child;
+  final bool match;
+  const BandMark({super.key, this.child, this.match = false});
   @override
   Widget build(BuildContext context) {
-    final (g, glow, _) = G.band(widget.role);
-    return SizedBox(
-      height: widget.height,
-      child: Stack(
-        fit: StackFit.expand,
-        clipBehavior: Clip.hardEdge,
-        children: [
-          DecoratedBox(decoration: BoxDecoration(gradient: g)),
-          // One soft light source, top-right.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(center: const Alignment(.9, -1.1), radius: 1.1, colors: [glow, glow.withValues(alpha: 0)], stops: const [0, .7]),
-            ),
-          ),
-          // Fine sheen for depth.
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x0FFFFFFF), Color(0x00FFFFFF)], stops: [0, .5]),
-            ),
-          ),
-          Positioned(left: 0, right: 0, bottom: -1, height: 28, child: CustomPaint(painter: _CurvePainter(context.c.bg))),
-        ],
+    final scope = context.dependOnInheritedWidgetOfExactType<_BandScope>();
+    final key = scope?.mark;
+    if (child == null) return SizedBox(key: key, height: 0);
+    scope?.match.value = match;
+    if (!match || scope == null) return KeyedSubtree(key: key, child: child!);
+    return ValueListenableBuilder<double>(
+      valueListenable: scope.pad,
+      builder: (_, pad, c) => Padding(
+        key: key,
+        padding: EdgeInsets.only(top: pad),
+        child: c,
       ),
+      child: child,
     );
   }
 }
 
-/// A single, gentle curve where the band meets the page.
-class _CurvePainter extends CustomPainter {
-  final Color bg;
-  _CurvePainter(this.bg);
-  @override
-  void paint(Canvas canvas, Size s) {
-    final p = Path()
-      ..moveTo(0, s.height * .15)
-      ..quadraticBezierTo(s.width / 2, s.height * 1.15, s.width, s.height * .15)
-      ..lineTo(s.width, s.height)
-      ..lineTo(0, s.height)
-      ..close();
-    canvas.drawPath(p, Paint()..color = bg);
-  }
-
-  @override
-  bool shouldRepaint(covariant _CurvePainter o) => o.bg != bg;
-}
-
-/// Marks where the band should end inside a [BandView]: the band stops just
-/// below this point, so the section heading that follows always sits on the
-/// page colour, whatever is above it. Place it as a direct child of the
-/// view's list (not inside a [Reveal]) so its position is final on the first frame.
-class BandMark extends StatelessWidget {
-  const BandMark({super.key});
-  @override
-  Widget build(BuildContext context) => SizedBox(key: context.dependOnInheritedWidgetOfExactType<_BandScope>()?.mark, height: 0);
-}
-
 class _BandScope extends InheritedWidget {
   final GlobalKey mark;
-  const _BandScope({required this.mark, required super.child});
+  final ValueNotifier<double> pad;
+  final ValueNotifier<bool> match;
+  const _BandScope({required this.mark, required this.pad, required this.match, required super.child});
   @override
   bool updateShouldNotify(_BandScope old) => old.mark != mark;
 }
@@ -1527,14 +1659,28 @@ class _BandViewState extends State<BandView> {
   final _mark = GlobalKey();
   double? _markedHeight;
 
-  /// Fit the band to the [BandMark], if the page placed one.
+  /// Ends the band through the middle of the [BandMark]'s container (the
+  /// wave runs behind it); screens without one use the standard height.
+  final _pad = ValueNotifier(0.0);
+  final _match = ValueNotifier(false);
+
   void _measure() {
     if (!mounted) return;
     final mark = _mark.currentContext?.findRenderObject() as RenderBox?;
     final me = context.findRenderObject() as RenderBox?;
     if (mark == null || me == null || !mark.attached) return;
-    // Content y of the mark (+ scroll, since the band scrolls with content), plus room for the curve.
-    final h = mark.localToGlobal(Offset.zero, ancestor: me).dy + _offset.value + 14;
+    final y = mark.localToGlobal(Offset.zero, ancestor: me).dy + _offset.value;
+    final ref = MediaQuery.paddingOf(context).top + kTodayBand;
+    double h;
+    if (_match.value && mark.size.height > 0) {
+      // Move the container down so its middle sits on the reference edge.
+      final childH = mark.size.height - _pad.value;
+      final pad = math.max(0.0, ref - (y + childH / 2 + HolaSkyPainter.wave / 2));
+      if ((pad - _pad.value).abs() > 1) _pad.value = pad;
+      h = (y + pad + childH / 2 + HolaSkyPainter.wave / 2).roundToDouble();
+    } else {
+      h = (mark.size.height > 0 ? y + mark.size.height / 2 + HolaSkyPainter.wave / 2 : y + 24).roundToDouble();
+    }
     if (_markedHeight == null || (h - _markedHeight!).abs() > 1) setState(() => _markedHeight = h);
   }
 
@@ -1549,6 +1695,8 @@ class _BandViewState extends State<BandView> {
 
   @override
   void dispose() {
+    _pad.dispose();
+    _match.dispose();
     _offset.dispose();
     super.dispose();
   }
@@ -1558,6 +1706,8 @@ class _BandViewState extends State<BandView> {
     final top = MediaQuery.paddingOf(context).top;
     final list = _BandScope(
       mark: _mark,
+      pad: _pad,
+      match: _match,
       child: ListView(padding: EdgeInsets.fromLTRB(kGutter, top + 12, kGutter, 128 + MediaQuery.paddingOf(context).bottom), children: widget.children),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
@@ -1571,7 +1721,7 @@ class _BandViewState extends State<BandView> {
           child: ValueListenableBuilder<double>(
             valueListenable: _offset,
             builder: (_, y, child) => Transform.translate(offset: Offset(0, -y), child: child),
-            child: Band(role: widget.role, height: _markedHeight ?? widget.bandHeight),
+            child: Band(role: widget.role, height: _markedHeight ?? top + kBandBody),
           ),
         ),
         NotificationListener<ScrollNotification>(
@@ -1627,21 +1777,49 @@ class TopHead extends StatelessWidget {
   final String? sub;
   final List<Widget> actions;
   final bool onBand;
-  const TopHead({super.key, this.eyebrow, required this.title, this.sub, this.actions = const [], this.onBand = true});
+
+  /// Keep the title on one line, shrinking a long name to fit.
+  final bool oneLine;
+  const TopHead({super.key, this.eyebrow, required this.title, this.sub, this.actions = const [], this.onBand = true, this.oneLine = false});
   @override
   Widget build(BuildContext context) {
     final fg = onBand ? Colors.white : context.c.ink;
+    // A tab screen opened as its own page (e.g. Team from More) gets a back button.
+    final inPage = context.dependOnInheritedWidgetOfExactType<InPage>() != null;
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (inPage) ...[
+            IconBtn(
+              'back',
+              onBand: onBand,
+              onTap: () {
+                Sfx.back();
+                Navigator.of(context).maybePop();
+              },
+            ),
+            const SizedBox(width: 10),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (eyebrow != null) Text(eyebrow!.toUpperCase(), style: T.eyebrow(context).copyWith(color: onBand ? Colors.white.withValues(alpha: .8) : null)),
-                Text(title, style: T.h1(context).copyWith(color: fg)),
+                if (eyebrow != null)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(eyebrow!.toUpperCase(), maxLines: 1, style: T.eyebrow(context).copyWith(color: onBand ? Colors.white.withValues(alpha: .8) : null)),
+                  ),
+                if (oneLine)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(title, maxLines: 1, style: T.h1(context).copyWith(color: fg)),
+                  )
+                else
+                  Text(title, style: T.h1(context).copyWith(color: fg)),
                 if (sub != null) Text(sub!, style: T.sm(context).copyWith(color: onBand ? Colors.white.withValues(alpha: .85) : context.c.muted)),
               ],
             ),
@@ -1651,6 +1829,13 @@ class TopHead extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Marks a tab screen shown as a pushed page, so its header shows a back button.
+class InPage extends InheritedWidget {
+  const InPage({super.key, required super.child});
+  @override
+  bool updateShouldNotify(InPage old) => false;
 }
 
 /// Pushed page scaffold: colour-wash background, glass sticky header with back button,
@@ -1712,21 +1897,17 @@ class _HPageState extends State<HPage> {
       backgroundColor: c.bg,
       body: Stack(
         children: [
-          // soft colour wash
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(center: const Alignment(1.1, -1.05), radius: 1.1, colors: [const Color(0xFF005BAC).withValues(alpha: .16), const Color(0x00005BAC)]),
+          // Night: a faint ring of light in the top corner. Light: a soft blue wash.
+          if (c.dark)
+            const Positioned.fill(child: GlowSky(sky: false, swoosh: false, center: Alignment(1.25, -1.05), scale: .55, intensity: .55))
+          else
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(center: const Alignment(1.1, -1.05), radius: 1.1, colors: [const Color(0xFF2F80FF).withValues(alpha: .14), const Color(0x002F80FF)]),
+                ),
               ),
             ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(center: const Alignment(-1.2, -.95), radius: .9, colors: [const Color(0xFFFF8A00).withValues(alpha: .13), const Color(0x00FF8A00)]),
-              ),
-            ),
-          ),
           RefreshIndicator(
             onRefresh: widget.onRefresh ?? () async {},
             notificationPredicate: (n) => widget.onRefresh != null && n.depth == 0,
@@ -1852,7 +2033,7 @@ class Kpi extends StatelessWidget {
     final fg = hl ? Colors.white : context.c.ink;
     return HCard(
       gradient: hl ? G.flame : null,
-      shadow: hl ? const [BoxShadow(color: Color(0x80E86F00), blurRadius: 24, spreadRadius: -10, offset: Offset(0, 12))] : null,
+      shadow: hl ? const [BoxShadow(color: Color(0x802F80FF), blurRadius: 24, spreadRadius: -10, offset: Offset(0, 12))] : null,
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1876,14 +2057,18 @@ class Kpi extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          // Scale long values down instead of wrapping them.
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: CountUp(
-              value,
-              format: format ?? (v) => v.round().toString(),
-              style: T.h1(context).copyWith(color: fg, fontSize: 28),
+          // Scale long values down instead of wrapping them, in a fixed-height
+          // slot so every tile keeps the same size.
+          SizedBox(
+            height: MediaQuery.textScalerOf(context).scale(38),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: CountUp(
+                value,
+                format: format ?? (v) => v.round().toString(),
+                style: T.h1(context).copyWith(color: fg, fontSize: 28),
+              ),
             ),
           ),
           if (sub != null) Text(sub!, style: T.cap(context).copyWith(color: hl ? Colors.white.withValues(alpha: .85) : null)),
@@ -1891,4 +2076,20 @@ class Kpi extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Summary numbers side by side, every tile the same height.
+class KpiRow extends StatelessWidget {
+  final List<Widget> kpis;
+  const KpiRow(this.kpis, {super.key});
+  @override
+  // Every tile in the row is the same height, whatever its value.
+  Widget build(BuildContext context) => IntrinsicHeight(
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < kpis.length; i++) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: kpis[i])],
+      ],
+    ),
+  );
 }

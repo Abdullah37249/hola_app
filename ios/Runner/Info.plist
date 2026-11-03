@@ -68,6 +68,10 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>HOLA uses the camera so you can take photos of your salon.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>HOLA records where sales officers check in at salons and where riders hand over deliveries.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>HOLA saves your certificates to your photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>HOLA uses your photos so you can add pictures of your salon.</string>
 </dict>

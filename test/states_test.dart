@@ -6,9 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hola_professional/core/utils/network_status.dart';
 import 'package:hola_professional/core/utils/sfx.dart';
 import 'package:hola_professional/shared/widgets/ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Loading, failure and offline states, plus the button's real busy state.
 void main() {
+  // Settings live in SharedPreferences; tests use an in-memory store.
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   setUpAll(() async {
     Sfx.enabled = false;
     final font = FontLoader('InstrumentSans')..addFont(rootBundle.load('assets/fonts/InstrumentSans.ttf'));

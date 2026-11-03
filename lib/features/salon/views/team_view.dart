@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/utils/clock.dart';
@@ -9,6 +8,7 @@ import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
 import '../viewmodels/salon_view_model.dart';
 import '../widgets/salon_widgets.dart';
+import 'training_view.dart';
 
 /// Owner's team: who works today, leave to answer, add and manage people.
 class SalonTeam extends StatelessWidget {
@@ -117,8 +117,8 @@ class _Team extends StatelessWidget {
             children: [
               MRow(
                 icon: 'cal',
-                title: tr('Leave requests'),
-                sub: pending.isEmpty ? tr('Approved and past time off') : tr('{n} waiting for you', {'n': pending.length}),
+                title: tr('Time off'),
+                sub: pending.isEmpty ? tr('Add days off for anyone on the team') : tr('{n} waiting for you', {'n': pending.length}),
                 trailing: countOrChev(context, pending.length, warn: true),
                 onTap: () => pushPage(context, const LeaveRequestsPage()),
               ),
@@ -140,12 +140,12 @@ class _AddMember extends StatefulWidget {
 }
 
 class _AddMemberState extends State<_AddMember> {
-  final name = TextEditingController(), email = TextEditingController(), phone = TextEditingController(), pass = TextEditingController(), title = TextEditingController();
+  final name = TextEditingController(), phone = TextEditingController(), title = TextEditingController();
   final errors = FieldErrors();
 
   @override
   void dispose() {
-    for (final t in [name, email, phone, pass, title]) {
+    for (final t in [name, phone, title]) {
       t.dispose();
     }
     errors.dispose();
@@ -154,47 +154,21 @@ class _AddMemberState extends State<_AddMember> {
 
   @override
   Widget build(BuildContext context) => VStack(gap: 14, [
-    SheetHead(tr('Add a team member'), sub: tr('They sign in to HOLA with this email and password to see their own appointments.')),
+    SheetHead(tr('Add a team member'), sub: tr('Team members don’t need a HOLA login. You manage their hours, bookings, time off and training from your salon account.')),
     HField(label: tr('Full name'), hint: tr('e.g. Ayesha Malik'), icon: 'user', controller: name, caps: TextCapitalization.words, name: 'name', errors: errors),
     HField(label: tr('Role'), hint: tr('e.g. Senior stylist'), icon: 'scissors', controller: title, caps: TextCapitalization.sentences),
-    HField(label: tr('Email'), hint: 'name@example.com', icon: 'mail', controller: email, keyboard: TextInputType.emailAddress, name: 'email', errors: errors),
-    HField(label: tr('Phone'), hint: '0300 1234567', icon: 'phone', controller: phone, keyboard: TextInputType.phone, name: 'phone', errors: errors),
-    HField(label: tr('Temporary password'), hint: tr('At least 8 characters'), icon: 'shield', controller: pass, keyboard: TextInputType.visiblePassword, action: TextInputAction.done, helper: tr('Share it with them; they can change it in their profile.'), name: 'password', errors: errors),
+    HField(label: tr('Phone (optional)'), hint: '0300 1234567', icon: 'phone', controller: phone, keyboard: TextInputType.phone, action: TextInputAction.done, name: 'phone', errors: errors),
     HButton(
       tr('Add to team'),
       icon: 'plus',
       block: true,
       onTap: () async {
         final ok = await attempt(
-          () => widget.vm.addStaff(name: name.text, email: email.text, phone: phone.text, password: pass.text, title: title.text),
+          () => widget.vm.addStaff(name: name.text, phone: phone.text, title: title.text),
           success: tr('{name} added to your team', {'name': name.text.trim().split(' ').first}),
           errors: errors,
         );
-        if (!ok || !context.mounted) return;
-        final creds = '${tr('HOLA sign-in')}\n${tr('Email')}: ${email.text.trim().toLowerCase()}\n${tr('Password')}: ${pass.text}';
-        Navigator.pop(context);
-        final root = Navigator.of(context, rootNavigator: true).context;
-        if (!root.mounted) return;
-        showHSheet(
-          root,
-          (ctx) => VStack(gap: 14, [
-            SheetHead(tr('Share their sign-in'), sub: tr('Send these details to your team member. Set their working hours next.')),
-            HCard(
-              color: ctx.c.surface2,
-              child: SelectableText(creds, style: T.body(ctx)),
-            ),
-            HButton(
-              tr('Copy details'),
-              icon: 'clip',
-              block: true,
-              onTap: () async {
-                await Clipboard.setData(ClipboardData(text: creds));
-                if (ctx.mounted) Navigator.pop(ctx);
-                Fx.toast(tr('Sign-in details copied'));
-              },
-            ),
-          ]),
-        );
+        if (ok && context.mounted) Navigator.pop(context);
       },
     ),
   ]);
@@ -270,7 +244,7 @@ class _MemberState extends State<_Member> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(person.name, style: T.h2(context)),
-                    Text(person.email, style: T.sub(context)),
+                    Text(isOwner ? tr('Salon account') : p!.title, style: T.sub(context)),
                     if (person.phone.isNotEmpty) Text(person.phone, style: T.sub(context)),
                   ],
                 ),
@@ -278,7 +252,7 @@ class _MemberState extends State<_Member> {
             ],
           ),
           const SizedBox(height: 16),
-          KpiRow([Kpi(tr('Upcoming bookings'), upcoming), Kpi(tr('Leave days'), leave.where((l) => l.status == 'APPROVED').fold(0, (t, l) => t + l.to.difference(l.from).inDays + 1))]),
+          KpiRow([Kpi(tr('Upcoming bookings'), upcoming), Kpi(tr('Days off'), leave.where((l) => l.status == 'APPROVED').fold(0, (t, l) => t + l.to.difference(l.from).inDays + 1))]),
           const SizedBox(height: 16),
           HField(label: tr('Role'), hint: tr('e.g. Senior stylist'), controller: title),
           const SizedBox(height: 12),
@@ -297,6 +271,23 @@ class _MemberState extends State<_Member> {
           Text(tr('Clients can only book inside these hours (and the salon’s opening hours).'), style: T.cap(context)),
           const SizedBox(height: 12),
           WeekEditor(week: week, onChanged: (w) => setState(() => week = w)),
+          const SizedBox(height: 22),
+          SecHead(
+            tr('Time off'),
+            action: tr('Add'),
+            onAction: () => showHSheet(context, (ctx) => LeaveForm(vm: vm, staffId: widget.id)),
+          ),
+          const SizedBox(height: 12),
+          if (leave.isEmpty)
+            Text(tr('No days off planned. Clients can’t book them on days off.'), style: T.cap(context))
+          else
+            for (final l in leave.take(5))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: LeaveCard(l, vm: vm, decide: true, mine: true),
+              ),
+          const SizedBox(height: 12),
+          MemberTraining(vm: vm, personId: widget.id),
           if (!isOwner && vm.isOwner) ...[
             const SizedBox(height: 20),
             HButton(
@@ -305,7 +296,13 @@ class _MemberState extends State<_Member> {
               kind: BtnKind.dangerSoft,
               block: true,
               onTap: () async {
-                if (!await confirmSheet(context, title: tr('Remove {name}?', {'name': person.firstName}), body: tr('Their HOLA sign-in stops working. Past appointments keep their name.'), confirm: tr('Remove'), danger: true)) {
+                if (!await confirmSheet(
+                  context,
+                  title: tr('Remove {name}?', {'name': person.firstName}),
+                  body: tr('They leave your team on HOLA. Past appointments keep their name.'),
+                  confirm: tr('Remove'),
+                  danger: true,
+                )) {
                   return;
                 }
                 final ok = await attempt(() => vm.removeStaff(widget.id), success: tr('{name} removed', {'name': person.firstName}));
@@ -354,7 +351,7 @@ class LeaveCard extends StatelessWidget {
                 label: switch (l.status) {
                   'APPROVED' => tr('Approved'),
                   'DECLINED' => tr('Declined'),
-                  'CANCELLED' => tr('Withdrawn'),
+                  'CANCELLED' => tr('Removed'),
                   _ => tr('Pending'),
                 },
               ),
@@ -379,15 +376,15 @@ class LeaveCard extends StatelessWidget {
               ],
             ),
           ],
-          if (mine && l.status == 'PENDING') ...[
+          if (decide && l.status == 'APPROVED' && !l.to.isBefore(today)) ...[
             const SizedBox(height: 10),
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerStart,
               child: HButton(
-                tr('Withdraw'),
+                tr('Remove time off'),
                 kind: BtnKind.ghost,
                 small: true,
-                onTap: () => attempt(() => vm.withdrawLeave(l.id), success: tr('Request withdrawn')),
+                onTap: () => attempt(() => vm.withdrawLeave(l.id), success: tr('Time off removed'), icon: 'x'),
               ),
             ),
           ],
@@ -397,7 +394,7 @@ class LeaveCard extends StatelessWidget {
   }
 }
 
-/// Owner: every leave request, pending first.
+/// Time off for the whole team: requests to answer first, then planned and past days off.
 class LeaveRequestsPage extends StatelessWidget {
   const LeaveRequestsPage({super.key});
   @override
@@ -407,19 +404,27 @@ class LeaveRequestsPage extends StatelessWidget {
         final vm = context.watch<SalonViewModel>();
         final all = [...vm.pendingLeave, ...vm.leave.where((l) => l.status != 'PENDING').toList().reversed];
         return HPage(
-          title: tr('Leave requests'),
+          title: tr('Time off'),
+          footer: FootBar(
+            child: HButton(
+              tr('Add time off'),
+              icon: 'plus',
+              block: true,
+              onTap: () => showHSheet(context, (ctx) => LeaveForm(vm: vm)),
+            ),
+          ),
           children: [
             const SizedBox(height: 8),
             if (all.isEmpty)
               HCard(
-                child: EmptyState(icon: 'cal', title: tr('No leave requests'), text: tr('When your team asks for time off, you approve or decline it here.')),
+                child: EmptyState(icon: 'sun', title: tr('No time off yet'), text: tr('Add days off for anyone on the team. Clients can’t book them on those days.')),
               ),
             for (final (i, l) in all.indexed)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Reveal(
                   i: i,
-                  child: LeaveCard(l, vm: vm, decide: vm.isOwner),
+                  child: LeaveCard(l, vm: vm, decide: true),
                 ),
               ),
           ],
@@ -429,76 +434,17 @@ class LeaveRequestsPage extends StatelessWidget {
   );
 }
 
-/// The signed-in team member's own hours and leave.
-class MyLeavePage extends StatelessWidget {
-  const MyLeavePage({super.key});
-  @override
-  Widget build(BuildContext context) => SalonScope(
-    child: Builder(
-      builder: (context) {
-        final vm = context.watch<SalonViewModel>();
-        final me = vm.me;
-        final p = me == null ? null : vm.profile(me.id);
-        final mine = vm.myLeave();
-        return HPage(
-          title: tr('My schedule & leave'),
-          footer: FootBar(
-            child: HButton(
-              tr('Request leave'),
-              icon: 'plus',
-              block: true,
-              onTap: () => showHSheet(context, (ctx) => _LeaveForm(vm: vm)),
-            ),
-          ),
-          children: [
-            const SizedBox(height: 8),
-            ...staggered([
-              SecHead(tr('My weekly hours')),
-              const SizedBox(height: 12),
-              Group(
-                children: [
-                  for (var i = 0; i < 7; i++)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Row(
-                        children: [
-                          Expanded(child: Text(tr(WeekEditor.names[i]), style: T.ttl(context))),
-                          Text(shiftText(p?.week[i]), style: T.sm(context).copyWith(color: p?.week[i] == null ? context.c.muted : context.c.ink)),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(vm.isOwner ? tr('Change hours in Team.') : tr('Your salon owner sets these hours.'), style: T.cap(context)),
-              const SizedBox(height: 22),
-              SecHead(tr('Leave')),
-              const SizedBox(height: 12),
-              if (mine.isEmpty)
-                HCard(
-                  child: EmptyState(icon: 'sun', title: tr('No leave yet'), text: tr('Request days off and your salon owner will approve them. You won’t be booked on approved days.')),
-                ),
-              for (final l in mine)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: LeaveCard(l, vm: vm, mine: true),
-                ),
-            ]),
-          ],
-        );
-      },
-    ),
-  );
-}
-
-class _LeaveForm extends StatefulWidget {
+/// Adds days off for a team member (or the salon account). Pass [staffId] to fix who.
+class LeaveForm extends StatefulWidget {
   final SalonViewModel vm;
-  const _LeaveForm({required this.vm});
+  final String? staffId;
+  const LeaveForm({super.key, required this.vm, this.staffId});
   @override
-  State<_LeaveForm> createState() => _LeaveFormState();
+  State<LeaveForm> createState() => _LeaveFormState();
 }
 
-class _LeaveFormState extends State<_LeaveForm> {
+class _LeaveFormState extends State<LeaveForm> {
+  late String? who = widget.staffId ?? (widget.vm.team.length == 1 ? widget.vm.team.first.accountId : null);
   DateTime? from, to;
   final reason = TextEditingController();
 
@@ -534,7 +480,11 @@ class _LeaveFormState extends State<_LeaveForm> {
       ),
     );
     return VStack(gap: 14, [
-      SheetHead(tr('Request leave'), sub: tr('Your salon owner is notified and approves it.')),
+      SheetHead(widget.staffId == null ? tr('Add time off') : tr('Time off for {name}', {'name': widget.vm.firstNameOf(widget.staffId!)}), sub: tr('Clients can’t book them on these days.')),
+      if (widget.staffId == null && widget.vm.team.length > 1)
+        ChipRow(
+          children: [for (final p in widget.vm.team) HChip(widget.vm.firstNameOf(p.accountId), on: who == p.accountId, onTap: () => setState(() => who = p.accountId))],
+        ),
       Row(
         children: [
           dateBox(tr('First day'), from, () async {
@@ -554,12 +504,12 @@ class _LeaveFormState extends State<_LeaveForm> {
       ),
       HField(label: tr('Reason'), hint: tr('e.g. Family wedding'), controller: reason, onChanged: (_) => setState(() {})),
       HButton(
-        tr('Send request'),
+        tr('Add time off'),
         block: true,
-        onTap: from == null || to == null || reason.text.trim().length < 3
+        onTap: who == null || from == null || to == null || reason.text.trim().length < 3
             ? null
             : () async {
-                final ok = await attempt(() => widget.vm.requestLeave(from!, to!, reason.text), success: widget.vm.isOwner ? tr('Leave added') : tr('Request sent'));
+                final ok = await attempt(() => widget.vm.addLeave(who!, from!, to!, reason.text), success: tr('Time off added'));
                 if (ok && context.mounted) Navigator.pop(context);
               },
       ),

@@ -70,17 +70,22 @@ class SkeletonList extends StatelessWidget {
         HCard(
           // Shimmer only the shapes, not the card behind them.
           child: Shimmer(
-            child: Row(children: [
-              const SkeletonBox(width: 52, height: 52, radius: 12),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  SkeletonBox(width: i.isEven ? 160 : 120, height: 16),
-                  const SizedBox(height: 8),
-                  SkeletonBox(width: i.isEven ? 110 : 150, height: 12),
-                ]),
-              ),
-            ]),
+            child: Row(
+              children: [
+                const SkeletonBox(width: 52, height: 52, radius: 12),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: i.isEven ? 160 : 120, height: 16),
+                      const SizedBox(height: 8),
+                      SkeletonBox(width: i.isEven ? 110 : 150, height: 12),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
     ]),
@@ -159,7 +164,8 @@ class OfflineBanner extends StatelessWidget {
                 children: [
                   const HIcon('wifi', size: 16, color: Color(0xFFFFB15C)),
                   const SizedBox(width: 8),
-                  Text(tr("You're offline. Check your connection."),
+                  Text(
+                    tr("You're offline. Check your connection."),
                     style: T.cap(context).copyWith(color: Colors.white, fontWeight: FontWeight.w600, decoration: TextDecoration.none),
                   ),
                 ],

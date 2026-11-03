@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/utils/format.dart';
+import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
 import '../viewmodels/trade_view_models.dart';
 import '../widgets/trade_widgets.dart';
+import 'pay_outstanding_page.dart';
 
 /// HOLA credit account: summary and ledger with running balance. Sales
 /// officers can also record payments and change the credit terms.
@@ -15,10 +17,8 @@ class StatementPage extends StatelessWidget {
   final String salonId;
 
   @override
-  Widget build(BuildContext context) => ChangeNotifierProvider(
-        create: (c) => StatementViewModel(c.read<TradeRepository>(), c.read<SalonRepository>(), c.read<AuthRepository>(), salonId),
-        child: const _Body(),
-      );
+  Widget build(BuildContext context) =>
+      ChangeNotifierProvider(create: (c) => StatementViewModel(c.read<TradeRepository>(), c.read<SalonRepository>(), c.read<AuthRepository>(), salonId), child: const _Body());
 }
 
 class _Body extends StatelessWidget {
@@ -29,17 +29,35 @@ class _Body extends StatelessWidget {
     final vm = context.watch<StatementViewModel>();
     final c = context.c;
     final s = vm.salon;
-    if (s == null) return HPage(title: tr('Credit statement'), children: [EmptyState(icon: 'store', title: tr('Salon not found'), text: tr('It may have been removed.'))]);
+    if (s == null) {
+      return HPage(
+        title: tr('Credit statement'),
+        children: [EmptyState(icon: 'store', title: tr('Salon not found'), text: tr('It may have been removed.'))],
+      );
+    }
     final cr = vm.credit;
     final rows = vm.ledger;
     return HPage(
       title: tr('Credit statement'),
       footer: vm.isOfficer
-          ? Row(children: [
-              Expanded(child: HButton(tr('Credit terms'), icon: 'edit', kind: BtnKind.secondary, block: true, onTap: () => _terms(context, vm))),
-              const SizedBox(width: 10),
-              Expanded(child: HButton(tr('Record payment'), icon: 'cash', block: true, onTap: cr.outstanding <= 0 ? null : () => _payment(context, vm))),
-            ])
+          ? Row(
+              children: [
+                Expanded(
+                  child: HButton(tr('Credit terms'), icon: 'edit', kind: BtnKind.secondary, block: true, onTap: () => _terms(context, vm)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: HButton(tr('Record payment'), icon: 'cash', block: true, onTap: cr.outstanding <= 0 ? null : () => _payment(context, vm)),
+                ),
+              ],
+            )
+          : cr.outstanding > 0
+          ? HButton(
+              tr('Pay outstanding'),
+              icon: 'cash',
+              block: true,
+              onTap: () => pushPage(context, PayOutstandingPage(salonId: s.id)),
+            )
           : null,
       children: [
         ...staggered([
@@ -58,6 +76,22 @@ class _Body extends StatelessWidget {
               ]),
             ),
           const SizedBox(height: 24),
+          if (vm.payments.isNotEmpty) ...[
+            SecHead(tr('Your payments')),
+            const SizedBox(height: 12),
+            HCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Column(
+                children: [
+                  for (final (i, p) in vm.payments.indexed) ...[
+                    if (i > 0) const HDivider(),
+                    _PaymentTile(p, onCancel: vm.isOfficer || p.status != 'PENDING' ? null : () => _cancelPay(context, vm, p)),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
           SecHead(tr('Activity')),
           const SizedBox(height: 12),
         ]),
@@ -72,12 +106,11 @@ class _Body extends StatelessWidget {
             i: 6,
             child: HCard(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Column(children: [
-                for (final (i, r) in rows.indexed) ...[
-                  if (i > 0) const HDivider(),
-                  _LedgerTile(r),
+              child: Column(
+                children: [
+                  for (final (i, r) in rows.indexed) ...[if (i > 0) const HDivider(), _LedgerTile(r)],
                 ],
-              ]),
+              ),
             ),
           ),
         if (vm.isOfficer) const SizedBox(height: 16),
@@ -93,10 +126,14 @@ class _Body extends StatelessWidget {
         SheetHead(tr('Record a payment'), sub: tr('{salon} owes {amount}.', {'salon': vm.salon?.name, 'amount': rs(vm.credit.outstanding)})),
         HField(label: tr('Amount received (Rs)'), hint: tr('e.g. 25000'), controller: amount, keyboard: TextInputType.number, icon: 'cash'),
         HField(label: tr('Note'), hint: tr('e.g. Bank transfer, cheque no.'), controller: note),
-        HButton(tr('Record payment'), block: true, onTap: () async {
-          final n = int.tryParse(amount.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-          if (await attempt(() => vm.recordPayment(n, note.text), success: tr('Payment recorded'), icon: 'cash') && ctx.mounted) Navigator.pop(ctx, true);
-        }),
+        HButton(
+          tr('Record payment'),
+          block: true,
+          onTap: () async {
+            final n = int.tryParse(amount.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+            if (await attempt(() => vm.recordPayment(n, note.text), success: tr('Payment recorded'), icon: 'cash') && ctx.mounted) Navigator.pop(ctx, true);
+          },
+        ),
       ]),
     );
     if (ok != true) return;
@@ -111,11 +148,109 @@ class _Body extends StatelessWidget {
         SheetHead(tr('Credit terms'), sub: tr('How much {salon} can order on credit, and how long they have to pay.', {'salon': vm.salon?.name})),
         HField(label: tr('Credit limit (Rs)'), hint: tr('0 = cash on delivery only'), controller: limit, keyboard: TextInputType.number, icon: 'cash'),
         HField(label: tr('Pay within (days)'), hint: '30', controller: days, keyboard: TextInputType.number, icon: 'cal'),
-        HButton(tr('Save terms'), block: true, onTap: () async {
-          int n(TextEditingController t) => int.tryParse(t.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-          if (await attempt(() => vm.setTerms(n(limit), n(days)), success: tr('Credit terms saved')) && ctx.mounted) Navigator.pop(ctx);
-        }),
+        HButton(
+          tr('Save terms'),
+          block: true,
+          onTap: () async {
+            int n(TextEditingController t) => int.tryParse(t.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+            if (await attempt(() => vm.setTerms(n(limit), n(days)), success: tr('Credit terms saved')) && ctx.mounted) Navigator.pop(ctx);
+          },
+        ),
       ]),
+    );
+  }
+}
+
+Future<void> _cancelPay(BuildContext context, StatementViewModel vm, PaymentRequest p) async {
+  final ok = await confirmSheet(
+    context,
+    title: tr('Cancel this payment?'),
+    body: tr('HOLA will stop expecting {amount} from you.', {'amount': rs(p.amount)}),
+    confirm: tr('Cancel payment'),
+    danger: true,
+  );
+  if (ok) await attempt(() => vm.cancelPayment(p.id), success: tr('Payment cancelled'), icon: 'x');
+}
+
+/// One payment the salon sent: how, how much, and where HOLA is with it.
+class _PaymentTile extends StatelessWidget {
+  const _PaymentTile(this.p, {this.onCancel});
+  final PaymentRequest p;
+  final VoidCallback? onCancel;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final how = switch (p.method) {
+      PayMethod.rider => tr('Cash to rider'),
+      PayMethod.cash => tr('Cash at HOLA office'),
+      PayMethod.online => tr('Online transfer'),
+    };
+    final (label, tone) = switch (p.status) {
+      'PENDING' => (p.method == PayMethod.rider ? tr('Rider will collect') : tr('Waiting for HOLA'), 'warn'),
+      'COLLECTED' => (tr('Rider collected'), 'info'),
+      'CONFIRMED' => (tr('Confirmed'), 'ok'),
+      'REJECTED' => (tr('Not accepted'), 'bad'),
+      _ => (tr('Cancelled'), 'mute'),
+    };
+    final extra = [
+      dLabel(p.createdAt),
+      if (p.code.isNotEmpty) p.code,
+      if (p.reference.isNotEmpty) p.reference,
+      if (p.collectedBy != null) tr('by {name}', {'name': p.collectedBy}),
+    ].join(' · ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: c.okSoft, shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: HIcon(
+              p.method == PayMethod.rider
+                  ? 'truck'
+                  : p.method == PayMethod.online
+                  ? 'upload'
+                  : 'cash',
+              size: 18,
+              color: c.ok,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(how, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
+                Text(extra, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.cap(context)),
+                if (p.status == 'REJECTED' && (p.rejectReason ?? '').isNotEmpty) Text(p.rejectReason!, style: T.cap(context).copyWith(color: c.badInk)),
+                if (onCancel != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Tap(
+                      onTap: onCancel,
+                      child: Text(
+                        tr('Cancel'),
+                        style: T.sm(context).copyWith(color: c.badInk, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(rs(p.shown), style: T.ttl(context)),
+              const SizedBox(height: 4),
+              ToneBadge(label, tone: tone),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -127,29 +262,52 @@ class _LedgerTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final e = r.entry;
-    final charge = e.kind == 'CHARGE';
+    final charge = e.effect > 0;
     final (icon, title, tint) = switch (e.kind) {
-      'CHARGE' => ('box', tr('Order {code}', {'code': e.ref}), c.brandSoft),
+      'CHARGE' => ('box', e.ref.isEmpty ? tr('Order on credit') : tr('Order {code}', {'code': e.ref}), c.brandSoft),
       'PAYMENT' => ('cash', tr('Payment received'), c.okSoft),
-      _ => ('x', tr('Cancelled {code}', {'code': e.ref}), c.bg2),
+      'ADJUSTMENT' => ('edit', tr('Adjustment by HOLA'), c.bg2),
+      _ => ('x', e.ref.isEmpty ? tr('Order cancelled') : tr('Cancelled {code}', {'code': e.ref}), c.bg2),
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(children: [
-        Container(width: 36, height: 36, decoration: BoxDecoration(color: tint, shape: BoxShape.circle), alignment: Alignment.center, child: HIcon(icon, size: 18, color: charge ? c.brandText : e.kind == 'PAYMENT' ? c.ok : c.muted)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
-            Text([dLabel(e.at), if (e.note.isNotEmpty) e.note].join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: T.cap(context)),
-          ]),
-        ),
-        const SizedBox(width: 8),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text('${charge ? '+' : '−'}${rs(e.amount)}', style: T.ttl(context).copyWith(color: charge ? c.ink : c.ok)),
-          Text(tr('Bal {amount}', {'amount': rs(r.balance)}), style: T.cap(context)),
-        ]),
-      ]),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: tint, shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: HIcon(
+              icon,
+              size: 18,
+              color: charge
+                  ? c.brandText
+                  : e.kind == 'PAYMENT'
+                  ? c.ok
+                  : c.muted,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
+                Text([dLabel(e.at), if (e.note.isNotEmpty && e.note != e.ref) e.note].join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: T.cap(context)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${charge ? '+' : '−'}${rs(e.effect.abs())}', style: T.ttl(context).copyWith(color: charge ? c.ink : c.ok)),
+              Text(tr('Bal {amount}', {'amount': rs(r.balance)}), style: T.cap(context)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

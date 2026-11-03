@@ -40,11 +40,21 @@ class _EditProfileState extends State<_EditProfile> {
     final a = vm.account;
     return HPage(
       title: tr('Edit profile'),
-      footer: HButton(tr('Save changes'), block: true, onTap: () async {
-        FocusScope.of(context).unfocus();
-        final nav = Navigator.of(context);
-        if (await attempt(() => vm.save(name: name.text, phone: phone.text, city: city.text), success: tr('Profile updated'), errors: errors)) nav.pop();
-      }),
+      footer: HButton(
+        tr('Save changes'),
+        block: true,
+        onTap: () async {
+          FocusScope.of(context).unfocus();
+          final nav = Navigator.of(context);
+          if (await attempt(
+            () => vm.save(name: name.text, phone: phone.text, city: city.text),
+            success: tr('Profile updated'),
+            errors: errors,
+          )) {
+            nav.pop();
+          }
+        },
+      ),
       children: staggered([
         Center(child: Avatar(a.name, size: 84, k: a.name.codeUnits.fold<int>(0, (s, x) => s + x))),
         const SizedBox(height: 10),
@@ -56,26 +66,47 @@ class _EditProfileState extends State<_EditProfile> {
           HCard(
             color: context.c.surface2,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(children: [
-              HIcon('msg', size: 20, color: context.c.muted),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr('Email'), style: T.cap(context)),
-                  Text(a.email, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sm(context).copyWith(color: context.c.ink, fontWeight: FontWeight.w600)),
-                ]),
-              ),
-              Text(tr('Sign-in'), style: T.cap(context)),
-            ]),
+            child: Row(
+              children: [
+                HIcon('msg', size: 20, color: context.c.muted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tr('Email'), style: T.cap(context)),
+                      Text(
+                        a.email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: T.sm(context).copyWith(color: context.c.ink, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(tr('Sign-in'), style: T.cap(context)),
+              ],
+            ),
           ),
           HField(label: tr('Phone'), icon: 'phone', controller: phone, keyboard: TextInputType.phone, autofill: const [AutofillHints.telephoneNumber], name: 'phone', errors: errors),
-          HField(label: tr('City'), icon: 'pin', controller: city, caps: TextCapitalization.words, autofill: const [AutofillHints.addressCity], action: TextInputAction.done, name: 'city', errors: errors),
+          HField(
+            label: tr('City'),
+            icon: 'pin',
+            controller: city,
+            caps: TextCapitalization.words,
+            autofill: const [AutofillHints.addressCity],
+            action: TextInputAction.done,
+            name: 'city',
+            errors: errors,
+          ),
         ]),
         if (a.role == Role.customer) ...[
           const SizedBox(height: 28),
-          Group(children: [
-            MRow(icon: 'alert', title: tr('Delete account'), sub: tr('Remove your profile and sign out'), titleColor: context.c.badInk, onTap: () => pushPage(context, const DeleteAccountPage())),
-          ]),
+          Group(
+            children: [
+              MRow(icon: 'alert', title: tr('Delete account'), sub: tr('Remove your profile and sign out'), titleColor: context.c.badInk, onTap: () => pushPage(context, const DeleteAccountPage())),
+            ],
+          ),
         ],
       ]),
     );
@@ -113,11 +144,15 @@ class _ChangePasswordState extends State<_ChangePassword> {
     return HPage(
       title: tr('Change password'),
       alwaysTitle: false,
-      footer: HButton(tr('Update password'), block: true, onTap: () async {
-        FocusScope.of(context).unfocus();
-        final nav = Navigator.of(context);
-        if (await attempt(() => vm.change(current.text, confirm.text), success: tr('Password updated'), icon: 'shield', errors: errors)) nav.pop();
-      }),
+      footer: HButton(
+        tr('Update password'),
+        block: true,
+        onTap: () async {
+          FocusScope.of(context).unfocus();
+          final nav = Navigator.of(context);
+          if (await attempt(() => vm.change(current.text, confirm.text), success: tr('Password updated'), icon: 'shield', errors: errors)) nav.pop();
+        },
+      ),
       children: staggered([
         Text(tr('Change password'), style: T.h1(context)),
         const SizedBox(height: 4),
@@ -125,12 +160,24 @@ class _ChangePasswordState extends State<_ChangePassword> {
         const SizedBox(height: 20),
         VStack(gap: 14, [
           PasswordField(label: tr('Current password'), controller: current, obscure: _hideCurrent, onToggle: () => setState(() => _hideCurrent = !_hideCurrent), name: 'current', errors: errors),
-          Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            PasswordField(label: tr('New password'), obscure: vm.obscure, onToggle: vm.toggleObscure, onChanged: vm.setNext, autofill: AutofillHints.newPassword, errors: errors),
-            const SizedBox(height: 8),
-            StrengthMeter(strength: vm.strength, hint: strengthHint(vm.strength)),
-          ]),
-          PasswordField(label: tr('Confirm new password'), controller: confirm, obscure: vm.obscure, onToggle: vm.toggleObscure, action: TextInputAction.done, autofill: AutofillHints.newPassword, name: 'confirm', errors: errors),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              PasswordField(label: tr('New password'), obscure: vm.obscure, onToggle: vm.toggleObscure, onChanged: vm.setNext, autofill: AutofillHints.newPassword, errors: errors),
+              const SizedBox(height: 8),
+              StrengthMeter(strength: vm.strength, hint: strengthHint(vm.strength)),
+            ],
+          ),
+          PasswordField(
+            label: tr('Confirm new password'),
+            controller: confirm,
+            obscure: vm.obscure,
+            onToggle: vm.toggleObscure,
+            action: TextInputAction.done,
+            autofill: AutofillHints.newPassword,
+            name: 'confirm',
+            errors: errors,
+          ),
         ]),
       ]),
     );
@@ -168,13 +215,18 @@ class _DeleteAccountState extends State<_DeleteAccount> {
     return HPage(
       title: tr('Delete account'),
       alwaysTitle: false,
-      footer: HButton(tr('Delete my account'), block: true, kind: BtnKind.danger, onTap: () async {
-        FocusScope.of(context).unfocus();
-        final ok = await confirmSheet(context, title: tr('Delete your account?'), body: tr("This can't be undone."), confirm: tr('Delete permanently'), danger: true, cancel: tr('Keep my account'));
-        if (!ok || !context.mounted) return;
-        final nav = Navigator.of(context);
-        if (await attempt(() => vm.delete(pass.text), success: tr('Your account was deleted'), icon: 'check', errors: errors)) nav.popUntil((r) => r.isFirst);
-      }),
+      footer: HButton(
+        tr('Delete my account'),
+        block: true,
+        kind: BtnKind.danger,
+        onTap: () async {
+          FocusScope.of(context).unfocus();
+          final ok = await confirmSheet(context, title: tr('Delete your account?'), body: tr("This can't be undone."), confirm: tr('Delete permanently'), danger: true, cancel: tr('Keep my account'));
+          if (!ok || !context.mounted) return;
+          final nav = Navigator.of(context);
+          if (await attempt(() => vm.delete(pass.text), success: tr('Your account was deleted'), icon: 'check', errors: errors)) nav.popUntil((r) => r.isFirst);
+        },
+      ),
       children: staggered([
         Container(
           width: 64,
@@ -186,7 +238,10 @@ class _DeleteAccountState extends State<_DeleteAccount> {
         const SizedBox(height: 16),
         Text(tr('Delete your account'), style: T.h1(context)),
         const SizedBox(height: 8),
-        Text(tr('Your profile, favourites and notifications are removed and you are signed out. Salons keep the name on past bookings for their records.'), style: T.body(context).copyWith(color: c.muted)),
+        Text(
+          tr('Your profile, favourites and notifications are removed and you are signed out. Salons keep the name on past bookings for their records.'),
+          style: T.body(context).copyWith(color: c.muted),
+        ),
         const SizedBox(height: 20),
         PasswordField(label: tr('Confirm with your password'), controller: pass, obscure: _hide, onToggle: () => setState(() => _hide = !_hide), action: TextInputAction.done, errors: errors),
       ]),

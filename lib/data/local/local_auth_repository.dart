@@ -6,6 +6,9 @@ import '../../core/utils/clock.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
 import 'local_database.dart';
+import '../../core/network/api.dart';
+import 'hola_mirror.dart';
+import 'hola_salon_sync.dart';
 
 /// Shared plumbing for the on-device repositories.
 abstract class LocalRepository implements Observable {
@@ -45,13 +48,48 @@ void validatePhone(String p) {
 }
 
 class LocalAuthRepository extends LocalRepository implements AuthRepository {
-  LocalAuthRepository(super.db);
+  /// With [api], every sign-in and customer sign-up is checked by the HOLA
+  /// server (owner's rule: no accounts that exist only on the phone) and the
+  /// account is mirrored here for the screens. Without it (tests), accounts
+  /// live on the device only.
+  LocalAuthRepository(super.db, {this.api}) {
+    api?.onSessionEnded = () {
+      db.sessionAccountId = null;
+      db.commit();
+    };
+  }
+  final HolaApi? api;
 
   @override
-  Future<void> init() => db.load();
+  Future<void> init() async {
+    await db.load();
+    // A session without server tokens (from before sign-in moved to HOLA) must sign in again.
+    if (api != null && db.sessionAccountId != null && !await api!.hasSession) {
+      db.sessionAccountId = null;
+      db.commit();
+    }
+    // Team members no longer sign in; the salon account manages them.
+    if (me?.role == Role.salonStaff) {
+      db.sessionAccountId = null;
+      db.commit();
+    }
+  }
 
   @override
   Account? get current => me;
+
+  @override
+  bool get usesServer => api != null;
+
+  @override
+  Future<void> requestPasswordReset(String email) async {
+    validateEmail(email);
+    try {
+      await api!.post('/auth/password/forgot', {'email': normEmail(email)}, auth: false);
+    } catch (e) {
+      throw apiToDomain(e);
+    }
+  }
 
   @override
   Account? account(String id) => db.accounts.where((a) => a.id == id).firstOrNull;
@@ -59,20 +97,65 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
   @override
   List<Account> accountsWithRole(Role role) => db.accounts.where((a) => a.role == role).toList();
 
-  Account? _byEmail(String email) => db.accounts.where((a) => a.email == normEmail(email)).firstOrNull;
+  Account? _byEmail(String email) => normEmail(email).isEmpty ? null : db.accounts.where((a) => a.email == normEmail(email)).firstOrNull;
 
   @override
   Future<Account> signIn(String email, String password) async {
+    if (api != null) return _serverSignIn(() => api!.login(normEmail(email), password));
     final a = _byEmail(email);
     if (a == null || hashPassword(password, a.salt) != a.passwordHash) throw DomainError(tr('Email or password is incorrect.'), field: 'password');
+    if (a.role == Role.salonStaff) throw DomainError(tr('Team members don’t sign in. Your salon manages your appointments on HOLA.'), field: 'email');
     db.sessionAccountId = a.id;
     db.commit();
     return a;
   }
 
   @override
-  Future<Account> signUp({required Role role, required String name, required String email, required String phone, required String password, String city = ''}) async {
-    if (!Role.signUp.contains(role)) throw DomainError(tr('Salon staff accounts are created by their salon.'));
+  Future<Account> signUp({required Role role, required String name, required String email, required String phone, required String password, String city = '', SalonDraft? salon}) async {
+    if (api != null) {
+      if (!Role.signUp.contains(role)) throw DomainError(tr('HOLA creates officer and rider accounts. Sign in with the details HOLA gave you.'));
+      if (name.trim().length < 2) throw DomainError(tr('Enter your full name.'), field: 'name');
+      validateEmail(email);
+      validatePhone(phone);
+      validatePassword(password);
+      if (role == Role.salonOwner) {
+        if (salon == null || salon.name.trim().length < 2) throw DomainError(tr('Enter your salon’s name.'), field: 'salonName');
+        if (city.trim().length < 2) throw DomainError(tr('Enter the city.'), field: 'city');
+      }
+      final a = await _serverSignIn(
+        () => role == Role.salonOwner
+            ? api!.registerSalon(
+                email: normEmail(email),
+                password: password,
+                fullName: name.trim(),
+                phone: _apiPhone(phone),
+                salon: {
+                  'name': salon!.name.trim(),
+                  'phone': _apiPhone(phone),
+                  'mainBranch': {
+                    'name': salon.area.trim().isEmpty ? city.trim() : salon.area.trim(),
+                    if (salon.address.trim().isNotEmpty) 'addressLine': salon.address.trim(),
+                    if (salon.area.trim().isNotEmpty) 'area': salon.area.trim(),
+                    'city': city.trim(),
+                    'phone': _apiPhone(phone),
+                    // The door's GPS, so HOLA's riders can navigate here.
+                    if (salon.location case final at?) ...{'latitude': at.lat, 'longitude': at.lng},
+                  },
+                },
+              )
+            : api!.register(email: normEmail(email), password: password, fullName: name.trim(), phone: _apiPhone(phone)),
+        city: city,
+      );
+      final at = salon?.location;
+      final b = at == null ? null : db.branches.where((x) => x.salonId == a.salonId).firstOrNull;
+      if (b != null) b.location = at;
+      db.notify(a.id, 'Welcome to HOLA, {name}', _welcome(role), args: {'name': a.firstName}, icon: 'sparkle');
+      db.commit();
+      return a;
+    }
+    if (!Role.signUp.contains(role)) {
+      throw DomainError(role == Role.salonStaff ? tr('Team members are added by their salon.') : tr('HOLA creates officer and rider accounts. Sign in with the details HOLA gave you.'));
+    }
     final a = createAccount(db, role: role, name: name, email: email, phone: phone, password: password, city: city);
     db.sessionAccountId = a.id;
     db.notify(a.id, 'Welcome to HOLA, {name}', _welcome(role), args: {'name': a.firstName}, icon: 'sparkle');
@@ -80,16 +163,166 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
     return a;
   }
 
+  // ── HOLA server ──
+
+  static const _fields = {
+    'fullName': 'name',
+    'email': 'email',
+    'password': 'password',
+    'phone': 'phone',
+    'salon.name': 'salonName',
+    'salon.mainBranch.city': 'city',
+    'salon.mainBranch.addressLine': 'address',
+    'salon.mainBranch.area': 'area',
+  };
+
+  /// The API wants digits with an optional leading + (e.g. +923001112233).
+  String _apiPhone(String p) => p.replaceAll(RegExp(r'[^0-9+]'), '');
+
+  /// Gets tokens with [getTokens], reads who it is from GET /me and mirrors
+  /// that account (and a salon owner's salon) on the phone.
+  Future<Account> _serverSignIn(Future<void> Function() getTokens, {String city = ''}) async {
+    try {
+      await getTokens();
+      final me = await api!.get('/me') as J;
+      final role = _roleOf(me);
+      String? salonId;
+      if (role == Role.salonOwner) salonId = await _mirrorMySalon(me['id'] as String);
+      final a = _mirrorAccount(me, role, salonId: salonId, city: city);
+      db.sessionAccountId = a.id;
+      db.commit();
+      return a;
+    } on DomainError {
+      await api!.clearSession();
+      rethrow;
+    } catch (e) {
+      await api!.clearSession();
+      throw apiToDomain(e, fieldNames: _fields);
+    }
+  }
+
+  Role _roleOf(J me) {
+    final roles = [for (final r in (me['roles'] as List? ?? const [])) (r as Map)['role'] as String];
+    final perms = {for (final p in (me['permissions'] as List? ?? const [])) '$p'};
+    return switch (me['kind']) {
+      'CUSTOMER' => Role.customer,
+      'SALON' when roles.contains('SALON_OWNER') || roles.contains('SALON_MANAGER') => Role.salonOwner,
+      'SALON' => throw DomainError(tr('Team members don’t sign in. Your salon manages your appointments on HOLA.')),
+      // HOLA staff go by permission, in this order (admins hold all of them
+      // and land on the officer home): visits → officer, training → trainer,
+      // deliveries → rider.
+      'EMPLOYEE' when perms.contains('visits.manage') || roles.contains('SALES_OFFICER') => Role.salesOfficer,
+      'EMPLOYEE' when perms.contains('training.manage') || roles.contains('TRAINER') => Role.trainer,
+      'EMPLOYEE' when perms.contains('deliveries.own') || roles.contains('DELIVERY_RIDER') => Role.rider,
+      // Other office staff work in the portal; sign-in stops here and signs out.
+      _ => throw DomainError(tr('Use the HOLA portal. This account is for the HOLA office, not the app.')),
+    };
+  }
+
+  Account _mirrorAccount(J me, Role role, {String? salonId, String city = ''}) {
+    final id = me['id'] as String;
+    final existing = account(id);
+    if (existing != null) {
+      existing
+        ..email = normEmail(me['email'] as String? ?? existing.email)
+        ..name = (me['fullName'] as String?) ?? existing.name
+        ..phone = (me['phone'] as String?) ?? existing.phone;
+      if (salonId != null) existing.salonId = salonId;
+      return existing;
+    }
+    // Another phone-only account with the same email would shadow this one.
+    db.accounts.removeWhere((a) => a.email == normEmail(me['email'] as String? ?? ''));
+    final a = Account(
+      id: id,
+      email: normEmail(me['email'] as String? ?? ''),
+      name: me['fullName'] as String? ?? '',
+      phone: me['phone'] as String? ?? '',
+      role: role,
+      passwordHash: '', // the server checks passwords
+      salt: '',
+      salonId: salonId,
+      city: city,
+      createdAt: DateTime.tryParse(me['createdAt'] as String? ?? '') ?? now(),
+    );
+    db.accounts.add(a);
+    return a;
+  }
+
+  /// Mirrors the owner's salon (from /me/salons, with branches and menu from
+  /// the directory when it's live) so the salon screens work.
+  /// Returns its id, or null when the account has no salon yet.
+  Future<String?> _mirrorMySalon(String ownerId) async {
+    final list = await api!.get('/me/salons') as List;
+    if (list.isEmpty) return null;
+    final s = (list.first as Map)['salon'] as Map;
+    final id = s['id'] as String;
+    final status = switch (s['status']) {
+      'ACTIVE' => SalonStatus.active,
+      'SUSPENDED' => SalonStatus.suspended,
+      _ => SalonStatus.pending,
+    };
+    if (status == SalonStatus.active) {
+      try {
+        await mirrorDiscoverSalon(db, api!, await api!.get('/discover/salons/$id', auth: false) as J, ownerId: ownerId);
+      } catch (_) {}
+    }
+    var salon = db.salons.where((x) => x.id == id).firstOrNull;
+    if (salon == null) {
+      salon = Salon(id: id, ownerId: ownerId, name: s['name'] as String? ?? '', phone: s['phone'] as String? ?? '', status: status, palette: db.salons.length % 6, hola: true, createdAt: now());
+      db.salons.add(salon);
+    }
+    salon
+      ..name = s['name'] as String? ?? salon.name
+      ..phone = s['phone'] as String? ?? salon.phone
+      ..status = status;
+    if (salon.ownerId != ownerId) {
+      final i = db.salons.indexOf(salon);
+      db.salons[i] = Salon.fromJson({...salon.toJson(), 'ownerId': ownerId});
+    }
+    if (!db.branches.any((b) => b.salonId == id)) {
+      db.branches.add(Branch(id: db.newId(), salonId: id, name: tr('Main'), address: '', area: '', city: s['city'] as String? ?? ''));
+    }
+    // The team as the server has it (names, titles, hours); the owner is the
+    // first stylist of a new salon.
+    if (status == SalonStatus.active) {
+      try {
+        final sync = HolaSalonSync(db, api!);
+        await sync.ensureOwnerBookable(id, ownerId);
+        await sync.pullTeam(id);
+      } catch (_) {}
+    }
+    // The server lists bookable stylists (the owner's member record included);
+    // only a salon with none yet gets the owner as its first professional.
+    if (!db.staff.any((p) => p.salonId == id)) {
+      final b = db.branches.where((x) => x.salonId == id).firstOrNull;
+      db.staff.add(StaffProfile(accountId: ownerId, salonId: id, title: 'Owner', week: [...?b?.hours], createdAt: now()));
+    }
+    return id;
+  }
+
+  /// Creates a sales officer or rider account without signing in. Stands in
+  /// for HOLA creating these accounts on its server until the API is
+  /// connected; there is no way to reach it from the app's screens.
+  Future<Account> provision({required Role role, required String name, required String email, required String phone, required String password, String city = ''}) async {
+    if (!{Role.salesOfficer, Role.rider, Role.trainer}.contains(role)) throw DomainError(tr("Your account can't do that."));
+    final a = createAccount(db, role: role, name: name, email: email, phone: phone, password: password, city: city);
+    db.notify(a.id, 'Welcome to HOLA, {name}', _welcome(role), args: {'name': a.firstName}, icon: 'sparkle');
+    db.commit();
+    return a;
+  }
+
   String _welcome(Role r) => switch (r) {
-        Role.customer => 'Find a salon near you and book in a few taps.',
-        Role.salonOwner => 'Set up your salon, services and team. HOLA verifies new salons before customers can book.',
-        Role.salesOfficer => 'Review new salons, plan visits and take trade orders.',
-        Role.rider => 'Deliveries assigned to you will appear here.',
-        Role.salonStaff => 'Your appointments and schedule live here.',
-      };
+    Role.customer => 'Find a salon near you and book in a few taps.',
+    Role.salonOwner => 'Set up your salon, services and team. HOLA verifies new salons before customers can book.',
+    Role.salesOfficer => 'Review new salons, plan visits and take trade orders.',
+    Role.rider => 'Deliveries assigned to you will appear here.',
+    Role.salonStaff => 'Your appointments and schedule live here.',
+    Role.trainer => 'Your training sessions, enrolments and attendance live here.',
+  };
 
   @override
   Future<void> signOut() async {
+    await api?.logout();
     db.sessionAccountId = null;
     db.commit();
     await db.flush();
@@ -97,6 +330,23 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
 
   @override
   Future<void> updateProfile({required String name, required String phone, required String city}) async {
+    if (api != null) {
+      final a = requireMe;
+      if (name.trim().length < 2) throw DomainError(tr('Enter your full name.'), field: 'name');
+      if (phone.trim().isNotEmpty) validatePhone(phone);
+      try {
+        final cur = await api!.get('/me') as J;
+        final me2 = await api!.patch('/me', {'fullName': name.trim(), 'phone': phone.trim().isEmpty ? null : _apiPhone(phone), 'version': cur['version']}) as J;
+        a
+          ..name = me2['fullName'] as String? ?? name.trim()
+          ..phone = me2['phone'] as String? ?? ''
+          ..city = city.trim();
+        db.commit();
+      } catch (e) {
+        throw apiToDomain(e, fieldNames: _fields);
+      }
+      return;
+    }
     final a = requireMe;
     if (name.trim().length < 2) throw DomainError(tr('Enter your full name.'), field: 'name');
     validatePhone(phone);
@@ -109,6 +359,16 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
 
   @override
   Future<void> changePassword(String current, String next) async {
+    if (api != null) {
+      validatePassword(next);
+      try {
+        await api!.post('/me/password', {'currentPassword': current, 'newPassword': next});
+      } on ApiError catch (e) {
+        if (e.code == 'INVALID_CREDENTIALS' || e.fields.containsKey('currentPassword')) throw DomainError(tr('Your current password is incorrect.'), field: 'current');
+        throw apiToDomain(e, fieldNames: const {'newPassword': 'password'});
+      }
+      return;
+    }
     final a = requireMe;
     if (hashPassword(current, a.salt) != a.passwordHash) throw DomainError(tr('Your current password is incorrect.'), field: 'current');
     validatePassword(next);
@@ -119,9 +379,10 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
 
   @override
   Future<void> resetPassword({required String email, required String phone, required String newPassword}) async {
+    if (api != null) throw DomainError(tr('Use the reset link HOLA emails you.'));
     final a = _byEmail(email);
     final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (a == null || a.phone.replaceAll(RegExp(r'[^0-9]'), '') != digits) throw DomainError(tr("That email and phone number don't match an account."), field: 'phone');
+    if (a == null || a.role == Role.salonStaff || a.phone.replaceAll(RegExp(r'[^0-9]'), '') != digits) throw DomainError(tr("That email and phone number don't match an account."), field: 'phone');
     validatePassword(newPassword);
     a.salt = db.newSalt();
     a.passwordHash = hashPassword(newPassword, a.salt);
@@ -131,6 +392,21 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
   @override
   Future<void> deleteAccount(String password) async {
     final a = requireMe;
+    if (api != null) {
+      if (a.role != Role.customer) throw DomainError(tr('Ask HOLA to close this account.'));
+      try {
+        await api!.post('/me/delete-account', {'password': password});
+      } on ApiError catch (e) {
+        if (e.code == 'INVALID_CREDENTIALS' || e.status == 401 || e.fields.containsKey('password')) throw DomainError(tr('Password is incorrect.'), field: 'password');
+        throw apiToDomain(e);
+      }
+      await api!.clearSession();
+      db.accounts.remove(a);
+      db.notifications.removeWhere((n) => n.userId == a.id);
+      db.sessionAccountId = null;
+      db.commit();
+      return;
+    }
     if (hashPassword(password, a.salt) != a.passwordHash) throw DomainError(tr('Password is incorrect.'), field: 'password');
     if (a.role == Role.salonOwner && a.salonId != null) throw DomainError(tr('A salon owner account can\'t be deleted while the salon is on HOLA.'));
     // Personal data goes; bookings keep the name the salon saw.

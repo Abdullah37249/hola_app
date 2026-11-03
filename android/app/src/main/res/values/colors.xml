@@ -2,5 +2,5 @@
 <resources>
     <color name="hola_brand">#005BAC</color>
     <!-- Launch screen: matches the first frame of the Flutter splash (kLaunchNavy). -->
-    <color name="launch_navy">#0B3566</color>
+    <color name="launch_navy">#000000</color>
 </resources>

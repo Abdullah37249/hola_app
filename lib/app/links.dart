@@ -17,16 +17,43 @@ void openLink(BuildContext context, NotifLink link) {
   final role = context.read<SessionViewModel>().account?.role;
   final salonSide = role == Role.salonOwner || role == Role.salonStaff;
   final Widget? page = switch (link.type) {
-    'appointment' => role == Role.customer ? BookingDetailPage(id: link.id) : salonSide ? AppointmentDetailPage(id: link.id) : null,
-    'order' => switch (role) { Role.rider => DeliveryPage(id: link.id), Role.salonOwner || Role.salesOfficer => OrderDetailPage(id: link.id), _ => null },
-    'salon' => role == Role.salesOfficer ? SalonRecordPage(id: link.id) : role == Role.salonOwner ? const SalonProfilePage() : null,
-    'training' => role == Role.salesOfficer ? TrainingAdminPage(id: link.id) : salonSide ? TrainingPage(id: link.id) : null,
-    'review' => salonSide
-        ? const ReviewsPage()
-        : _customerReview(context, link.id),
+    'appointment' =>
+      role == Role.customer
+          ? BookingDetailPage(id: link.id)
+          : salonSide
+          ? AppointmentDetailPage(id: link.id)
+          : null,
+    'order' => switch (role) {
+      Role.rider => DeliveryPage(id: link.id),
+      Role.salonOwner || Role.salesOfficer => OrderDetailPage(id: link.id),
+      _ => null,
+    },
+    'salon' =>
+      role == Role.salesOfficer
+          ? SalonRecordPage(id: link.id)
+          : role == Role.salonOwner
+          ? const SalonProfilePage()
+          : null,
+    'training' =>
+      role == Role.salesOfficer || role == Role.trainer
+          ? TrainingAdminPage(id: link.id)
+          : salonSide
+          ? TrainingPage(id: link.id)
+          : null,
+    'review' => salonSide ? const ReviewsPage() : _customerReview(context, link.id),
     'complaint' => salonSide ? const FeedbackInboxPage() : const MyFeedbackPage(),
     'chat' => ChatPage(threadId: link.id, asSalon: salonSide),
-    'leave' => role == Role.salonOwner ? const LeaveRequestsPage() : role == Role.salonStaff ? const MyLeavePage() : null,
+    'leave' => role == Role.salonOwner ? const LeaveRequestsPage() : null,
+    // A coupon HOLA sent the salon → its offers.
+    'offers' => switch (context.read<SessionViewModel>().account?.salonId) {
+      final id? when salonSide => OffersPage(salonId: id),
+      _ => null,
+    },
+    // A credit payment confirmed, rejected or collected → the salon's statement.
+    'payment' => switch (context.read<SessionViewModel>().account?.salonId) {
+      final id? when salonSide => StatementPage(salonId: id),
+      _ => null,
+    },
     _ => null,
   };
   if (page != null) pushPage(context, page);

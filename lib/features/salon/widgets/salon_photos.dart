@@ -33,10 +33,14 @@ class SalonPhotos extends StatelessWidget {
         ? [if (await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 82) case final x?) x]
         : await _picker.pickMultiImage(maxWidth: 1600, imageQuality: 82, limit: left > 1 ? left : null);
     if (picked.isEmpty) return;
-    await attempt(() async {
-      final kept = [for (final x in picked.take(left)) await PhotoFiles.keep(x.path)];
-      await vm.setPhotos([..._photos, ...kept]);
-    }, success: picked.length == 1 ? tr('Photo added') : tr('{n} photos added', {'n': picked.take(left).length}), icon: 'camera');
+    await attempt(
+      () async {
+        final kept = [for (final x in picked.take(left)) await PhotoFiles.keep(x.path)];
+        await vm.setPhotos([..._photos, ...kept]);
+      },
+      success: picked.length == 1 ? tr('Photo added') : tr('{n} photos added', {'n': picked.take(left).length}),
+      icon: 'camera',
+    );
   }
 
   Future<void> _open(BuildContext context, String name) async {
@@ -44,7 +48,13 @@ class SalonPhotos extends StatelessWidget {
     final choice = await showHSheet<String>(
       context,
       (ctx) => VStack(gap: 10, [
-        ClipRRect(borderRadius: BorderRadius.circular(16), child: AspectRatio(aspectRatio: 4 / 3, child: SalonArt(0, photo: name, radius: 0))),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: AspectRatio(
+            aspectRatio: 4 / 3,
+            child: SalonArt(0, photo: name, radius: 0),
+          ),
+        ),
         if (!isCover) HButton(tr('Make cover photo'), icon: 'star', block: true, onTap: () => Navigator.pop(ctx, 'cover')),
         HButton(tr('Remove photo'), icon: 'x', block: true, kind: BtnKind.dangerSoft, onTap: () => Navigator.pop(ctx, 'remove')),
       ]),
@@ -61,7 +71,10 @@ class SalonPhotos extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final photos = _photos;
-    Widget tile({required Widget child, VoidCallback? onTap}) => Tap(onTap: onTap, child: SizedBox(width: 104, height: 104, child: child));
+    Widget tile({required Widget child, VoidCallback? onTap}) => Tap(
+      onTap: onTap,
+      child: SizedBox(width: 104, height: 104, child: child),
+    );
     return SizedBox(
       height: 104,
       child: ListView(
@@ -79,11 +92,17 @@ class SalonPhotos extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: c.brandLine, width: 1.5),
                   ),
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    HIcon('camera', size: 26, color: c.brandText),
-                    const SizedBox(height: 6),
-                    Text(photos.isEmpty ? tr('Add photos') : tr('Add more'), style: T.cap(context).copyWith(color: c.brandText, fontWeight: FontWeight.w600)),
-                  ]),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      HIcon('camera', size: 26, color: c.brandText),
+                      const SizedBox(height: 6),
+                      Text(
+                        photos.isEmpty ? tr('Add photos') : tr('Add more'),
+                        style: T.cap(context).copyWith(color: c.brandText, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -94,7 +113,17 @@ class SalonPhotos extends StatelessWidget {
                 key: ValueKey(p),
                 child: tile(
                   onTap: () => _open(context, p),
-                  child: SalonArt(0, photo: p, radius: 16, child: i == 0 ? const Align(alignment: Alignment.bottomLeft, child: Padding(padding: EdgeInsets.all(6), child: _CoverTag())) : null),
+                  child: SalonArt(
+                    0,
+                    photo: p,
+                    radius: 16,
+                    child: i == 0
+                        ? const Align(
+                            alignment: Alignment.bottomLeft,
+                            child: Padding(padding: EdgeInsets.all(6), child: _CoverTag()),
+                          )
+                        : null,
+                  ),
                 ),
               ),
             ),
@@ -110,6 +139,9 @@ class _CoverTag extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(color: Colors.black.withValues(alpha: .55), borderRadius: BorderRadius.circular(8)),
-    child: Text(tr('Cover'), style: const TextStyle(fontFamily: T.f, fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+    child: Text(
+      tr('Cover'),
+      style: const TextStyle(fontFamily: T.f, fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+    ),
   );
 }

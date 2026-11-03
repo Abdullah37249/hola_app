@@ -34,6 +34,13 @@ class Appointment {
   final List<StatusEvent> history;
   final DateTime createdAt;
 
+  /// Booked on the HOLA server (a HOLA salon); [version] guards edits there.
+  final bool hola;
+  int version;
+
+  /// Last moment to cancel without it counting as late (from the server).
+  final DateTime? freeCancelUntil;
+
   Appointment({
     required this.id,
     required this.code,
@@ -54,6 +61,9 @@ class Appointment {
     this.reviewed = false,
     List<StatusEvent>? history,
     required this.createdAt,
+    this.hola = false,
+    this.version = 0,
+    this.freeCancelUntil,
   }) : history = history ?? [];
 
   DateTime get endsAt => startsAt.add(Duration(minutes: durationMin));
@@ -61,17 +71,54 @@ class Appointment {
   StatusEvent? event(String s) => history.lastWhereOrNull((e) => e.status == s);
 
   Json toJson() => {
-        'id': id, 'code': code, 'salonId': salonId, 'branchId': branchId, 'customerId': customerId, 'customerName': customerName, 'customerPhone': customerPhone,
-        'staffId': staffId, 'serviceIds': serviceIds, 'serviceNames': serviceNames, 'startsAt': iso(startsAt), 'durationMin': durationMin, 'price': price,
-        'status': status, 'notes': notes, 'lateCancel': lateCancel, 'reviewed': reviewed, 'history': [for (final h in history) h.toJson()], 'createdAt': iso(createdAt),
-      };
+    'id': id,
+    'code': code,
+    'salonId': salonId,
+    'branchId': branchId,
+    'customerId': customerId,
+    'customerName': customerName,
+    'customerPhone': customerPhone,
+    'staffId': staffId,
+    'serviceIds': serviceIds,
+    'serviceNames': serviceNames,
+    'startsAt': iso(startsAt),
+    'durationMin': durationMin,
+    'price': price,
+    'status': status,
+    'notes': notes,
+    'lateCancel': lateCancel,
+    'reviewed': reviewed,
+    'history': [for (final h in history) h.toJson()],
+    'createdAt': iso(createdAt),
+    'hola': hola,
+    'version': version,
+    'freeCancelUntil': iso(freeCancelUntil),
+  };
 
   factory Appointment.fromJson(Json j) => Appointment(
-        id: j['id'], code: j['code'], salonId: j['salonId'], branchId: j['branchId'], customerId: j['customerId'], customerName: j['customerName'],
-        customerPhone: j['customerPhone'] ?? '', staffId: j['staffId'], serviceIds: strs(j['serviceIds']), serviceNames: strs(j['serviceNames']),
-        startsAt: dt(j['startsAt'])!, durationMin: asInt(j['durationMin']), price: asInt(j['price']), status: j['status'], notes: j['notes'] ?? '',
-        lateCancel: j['lateCancel'] ?? false, reviewed: j['reviewed'] ?? false, history: objs(j['history'], StatusEvent.fromJson), createdAt: dt(j['createdAt'])!,
-      );
+    id: j['id'],
+    code: j['code'],
+    salonId: j['salonId'],
+    branchId: j['branchId'],
+    customerId: j['customerId'],
+    customerName: j['customerName'],
+    customerPhone: j['customerPhone'] ?? '',
+    staffId: j['staffId'],
+    serviceIds: strs(j['serviceIds']),
+    serviceNames: strs(j['serviceNames']),
+    startsAt: dt(j['startsAt'])!,
+    durationMin: asInt(j['durationMin']),
+    price: asInt(j['price']),
+    status: j['status'],
+    notes: j['notes'] ?? '',
+    lateCancel: j['lateCancel'] ?? false,
+    reviewed: j['reviewed'] ?? false,
+    history: objs(j['history'], StatusEvent.fromJson),
+    createdAt: dt(j['createdAt'])!,
+    hola: j['hola'] ?? false,
+    version: asInt(j['version']),
+    freeCancelUntil: dt(j['freeCancelUntil']),
+  );
 }
 
 extension _LastWhere<T> on List<T> {

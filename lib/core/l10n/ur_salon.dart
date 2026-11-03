@@ -85,7 +85,8 @@ const Map<String, String> urSalon = {
   'Resolved': 'حل شدہ',
   'Nothing to answer': 'جواب دینے کو کچھ نہیں',
   'Nothing resolved yet': 'ابھی کچھ حل نہیں ہوا',
-  'When a client sends feedback or a complaint about your salon, it lands here for you to respond.': 'جب کوئی کلائنٹ آپ کے سیلون کے بارے میں رائے یا شکایت بھیجتا ہے تو وہ یہاں آتی ہے تاکہ آپ جواب دے سکیں۔',
+  'When a client sends feedback or a complaint about your salon, it lands here for you to respond.':
+      'جب کوئی کلائنٹ آپ کے سیلون کے بارے میں رائے یا شکایت بھیجتا ہے تو وہ یہاں آتی ہے تاکہ آپ جواب دے سکیں۔',
   'Booking {code} · {date}': 'بکنگ {code} · {date}',
   'Your response · {when}': 'آپ کا جواب · {when}',
   'Respond & resolve': 'جواب دیں اور حل کریں',
@@ -133,7 +134,8 @@ const Map<String, String> urSalon = {
   '{name} added to your menu': '{name} آپ کے مینو میں شامل ہو گئی',
   'Delete service': 'سروس حذف کریں',
   'Delete {name}?': '{name} حذف کریں؟',
-  'Past bookings keep it. If clients have upcoming bookings for it, hide it instead.': 'پچھلی بکنگز میں یہ برقرار رہے گی۔ اگر کلائنٹس کی اس کے لیے آنے والی بکنگز ہیں تو اسے حذف کرنے کے بجائے پوشیدہ کر دیں۔',
+  'Past bookings keep it. If clients have upcoming bookings for it, hide it instead.':
+      'پچھلی بکنگز میں یہ برقرار رہے گی۔ اگر کلائنٹس کی اس کے لیے آنے والی بکنگز ہیں تو اسے حذف کرنے کے بجائے پوشیدہ کر دیں۔',
   'Delete': 'حذف کریں',
   'Service deleted': 'سروس حذف ہو گئی',
   'No services yet': 'ابھی کوئی سروس نہیں',

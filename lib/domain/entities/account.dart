@@ -7,19 +7,25 @@ enum Role {
   salonOwner,
   salonStaff,
   salesOfficer,
-  rider;
+  rider,
+
+  /// HOLA Academy trainer: runs training sessions (training.manage).
+  trainer;
 
   /// Display name in the app language.
   String get label => switch (this) {
-        customer => tr('Customer'),
-        salonOwner => tr('Salon owner'),
-        salonStaff => tr('Salon staff'),
-        salesOfficer => tr('Sales officer'),
-        rider => tr('Delivery rider'),
-      };
+    customer => tr('Customer'),
+    salonOwner => tr('Salon'),
+    salonStaff => tr('Salon staff'),
+    salesOfficer => tr('Sales officer'),
+    rider => tr('Delivery rider'),
+    trainer => tr('HOLA trainer'),
+  };
 
-  /// Roles a person can pick when signing up (staff are added by their salon).
-  static const signUp = [customer, salonOwner, salesOfficer, rider];
+  /// Roles a person can pick when signing up. Sales officers and riders get
+  /// their accounts from HOLA and only sign in; salon team members are added
+  /// by their salon and don't sign in.
+  static const signUp = [customer, salonOwner];
 }
 
 class Account {
@@ -49,15 +55,32 @@ class Account {
   String get firstName => name.trim().split(RegExp(r'\s+')).first;
 
   Json toJson() => {
-        'id': id, 'email': email, 'name': name, 'phone': phone, 'role': role.name, 'passwordHash': passwordHash, 'salt': salt,
-        'salonId': salonId, 'city': city, 'createdAt': iso(createdAt), 'favourites': favourites,
-      };
+    'id': id,
+    'email': email,
+    'name': name,
+    'phone': phone,
+    'role': role.name,
+    'passwordHash': passwordHash,
+    'salt': salt,
+    'salonId': salonId,
+    'city': city,
+    'createdAt': iso(createdAt),
+    'favourites': favourites,
+  };
 
   factory Account.fromJson(Json j) => Account(
-        id: j['id'], email: j['email'], name: j['name'], phone: j['phone'] ?? '', role: Role.values.byName(j['role']),
-        passwordHash: j['passwordHash'], salt: j['salt'], salonId: j['salonId'], city: j['city'] ?? '', createdAt: dt(j['createdAt'])!,
-        favourites: strs(j['favourites']),
-      );
+    id: j['id'],
+    email: j['email'],
+    name: j['name'],
+    phone: j['phone'] ?? '',
+    role: Role.values.byName(j['role']),
+    passwordHash: j['passwordHash'],
+    salt: j['salt'],
+    salonId: j['salonId'],
+    city: j['city'] ?? '',
+    createdAt: dt(j['createdAt'])!,
+    favourites: strs(j['favourites']),
+  );
 }
 
 /// A working window on one weekday, minutes from midnight.
@@ -74,21 +97,32 @@ class StaffProfile {
   final String accountId, salonId;
   String title;
   bool bookable;
+
   /// Weekly shifts indexed by weekday 1 (Mon) .. 7 (Sun); null = day off.
   final List<Shift?> week;
   final DateTime createdAt;
 
-  StaffProfile({required this.accountId, required this.salonId, required this.title, this.bookable = true, List<Shift?>? week, required this.createdAt})
-      : week = week ?? List<Shift?>.filled(7, null);
+  StaffProfile({required this.accountId, required this.salonId, required this.title, this.bookable = true, List<Shift?>? week, required this.createdAt}) : week = week ?? List<Shift?>.filled(7, null);
 
   Shift? shiftOn(DateTime d) => week[d.weekday - 1];
 
-  Json toJson() => {'accountId': accountId, 'salonId': salonId, 'title': title, 'bookable': bookable, 'week': [for (final s in week) s?.toJson()], 'createdAt': iso(createdAt)};
+  Json toJson() => {
+    'accountId': accountId,
+    'salonId': salonId,
+    'title': title,
+    'bookable': bookable,
+    'week': [for (final s in week) s?.toJson()],
+    'createdAt': iso(createdAt),
+  };
 
   factory StaffProfile.fromJson(Json j) => StaffProfile(
-        accountId: j['accountId'], salonId: j['salonId'], title: j['title'] ?? '', bookable: j['bookable'] ?? true,
-        week: [for (final s in (j['week'] as List)) s == null ? null : Shift.fromJson(s as Json)], createdAt: dt(j['createdAt'])!,
-      );
+    accountId: j['accountId'],
+    salonId: j['salonId'],
+    title: j['title'] ?? '',
+    bookable: j['bookable'] ?? true,
+    week: [for (final s in (j['week'] as List)) s == null ? null : Shift.fromJson(s as Json)],
+    createdAt: dt(j['createdAt'])!,
+  );
 }
 
 class LeaveRequest {
@@ -106,5 +140,6 @@ class LeaveRequest {
   }
 
   Json toJson() => {'id': id, 'salonId': salonId, 'staffId': staffId, 'from': iso(from), 'to': iso(to), 'reason': reason, 'status': status, 'createdAt': iso(createdAt)};
-  factory LeaveRequest.fromJson(Json j) => LeaveRequest(id: j['id'], salonId: j['salonId'], staffId: j['staffId'], from: dt(j['from'])!, to: dt(j['to'])!, reason: j['reason'] ?? '', status: j['status'], createdAt: dt(j['createdAt'])!);
+  factory LeaveRequest.fromJson(Json j) =>
+      LeaveRequest(id: j['id'], salonId: j['salonId'], staffId: j['staffId'], from: dt(j['from'])!, to: dt(j['to'])!, reason: j['reason'] ?? '', status: j['status'], createdAt: dt(j['createdAt'])!);
 }

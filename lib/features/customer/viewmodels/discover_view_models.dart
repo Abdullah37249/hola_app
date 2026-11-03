@@ -7,12 +7,20 @@ import 'customer_lookups.dart';
 
 /// Home tab: next visit, favourites, salons to discover, a visit to review.
 class HomeViewModel extends RepoViewModel with CustomerLookups {
-  HomeViewModel(this.salons, this.bookings, this.auth) : super(salons);
+  HomeViewModel(this.salons, this.bookings, this.auth, this.engage) : super(salons) {
+    salons.syncDirectory(); // HOLA's live salons
+  }
+
+  Future<void> syncSalons() => salons.syncDirectory();
   @override
   final SalonRepository salons;
   @override
   final AuthRepository auth;
   final BookingRepository bookings;
+  final EngagementRepository engage;
+
+  /// Rates a finished visit; the "How was…?" card then goes away.
+  Future<void> addReview(String appointmentId, int stars, String text) => engage.addReview(appointmentId: appointmentId, stars: stars, text: text);
 
   List<Appointment> get _mine => me == null ? const [] : bookings.forCustomer(me!.id);
 
@@ -37,16 +45,23 @@ class HomeViewModel extends RepoViewModel with CustomerLookups {
 
   String get greeting {
     final h = now().hour;
-    return h < 12 ? tr('Good morning') : h < 17 ? tr('Good afternoon') : tr('Good evening');
+    return h < 12
+        ? tr('Good morning')
+        : h < 17
+        ? tr('Good afternoon')
+        : tr('Good evening');
   }
 }
 
 /// Explore tab: search, category and city filters over live salons.
 class ExploreViewModel extends RepoViewModel with CustomerLookups {
   ExploreViewModel(this.salons, this.auth) : super(salons) {
+    salons.syncDirectory(); // HOLA's live salons
     category = exploreIntent.category;
     exploreIntent.addListener(_intent);
   }
+
+  Future<void> syncSalons() => salons.syncDirectory();
   @override
   final SalonRepository salons;
   @override

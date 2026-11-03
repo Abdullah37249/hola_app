@@ -31,6 +31,9 @@ import 'package:hola_professional/features/trade/trade.dart';
 import 'package:hola_professional/main.dart';
 import 'package:hola_professional/shared/widgets/fx.dart';
 import 'package:provider/provider.dart';
+import 'package:hola_professional/features/profile/views/permissions_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hola_professional/data/local/local_auth_repository.dart';
 
 const pw = 'secret-pass-1';
 const dark = bool.fromEnvironment('DARK');
@@ -38,7 +41,7 @@ const lang = String.fromEnvironment('LANG', defaultValue: 'en');
 const shotDir = lang == 'ur' ? 'screens_ur' : dark ? 'screens_dark' : 'screens';
 
 class Ids {
-  late String salon, branch, appt, done, order, visit, training, thread;
+  late String salon, branch, appt, done, order, visit, training, pastTraining, ayesha, thread;
 }
 
 /// A believable day across all roles, created through the real repositories.
@@ -46,7 +49,13 @@ Future<Ids> scenario(BuildContext ctx) async {
   final ids = Ids();
   final auth = ctx.read<AuthRepository>(), salons = ctx.read<SalonRepository>(), book = ctx.read<BookingRepository>();
   final eng = ctx.read<EngagementRepository>(), trade = ctx.read<TradeRepository>(), field = ctx.read<FieldRepository>();
-  Future<Account> up(Role r, String name, String email) => auth.signUp(role: r, name: name, email: email, phone: '0300 1234567', password: pw, city: 'Lahore');
+  // Officers and riders come from HOLA: create them, then sign in like the app does.
+  Future<Account> up(Role r, String name, String email) async {
+    if (Role.signUp.contains(r)) return auth.signUp(role: r, name: name, email: email, phone: '0300 1234567', password: pw, city: 'Lahore');
+    final a = await (auth as LocalAuthRepository).provision(role: r, name: name, email: email, phone: '0300 1234567', password: pw, city: 'Lahore');
+    await auth.signIn(email, pw);
+    return a;
+  }
   Future<void> as(String e) => auth.signIn(e, pw);
 
   await up(Role.salesOfficer, 'Bilal Ahmed', 'officer@t.pk');
@@ -59,8 +68,9 @@ Future<Ids> scenario(BuildContext ctx) async {
   final colour = await salons.saveService(salonId: s.id, name: 'Root touch-up', category: 'Colour', description: '', price: 6500, durationMin: 90);
   await salons.saveService(salonId: s.id, name: 'Gel manicure', category: 'Nails', description: '', price: 2800, durationMin: 45);
   await salons.saveService(salonId: s.id, name: 'HydraFacial', category: 'Skin', description: '', price: 9000, durationMin: 60);
-  await salons.addStaff(s.id, name: 'Ayesha Malik', email: 'staff@t.pk', phone: '0301 2223334', password: pw, title: 'Senior stylist');
-  await salons.addStaff(s.id, name: 'Hamza Iqbal', email: 'hamza@t.pk', phone: '0301 2223335', password: pw, title: 'Colour specialist');
+  final ayesha = await salons.addStaff(s.id, name: 'Ayesha Malik', phone: '0301 2223334', title: 'Senior stylist');
+  ids.ayesha = ayesha.id;
+  await salons.addStaff(s.id, name: 'Hamza Iqbal', phone: '0301 2223335', title: 'Colour specialist');
   await up(Role.salonOwner, 'Rabia Shah', 'owner2@t.pk');
   final s2 = await salons.createSalon(name: 'Glow Bar', phone: '0300 3334445', about: 'Nails and skin.', branchName: '', address: '22-C Faisal Town', area: 'Faisal Town', city: 'Lahore');
   await salons.saveService(salonId: s2.id, name: 'Spa pedicure', category: 'Nails', description: '', price: 3200, durationMin: 60);
@@ -76,6 +86,20 @@ Future<Ids> scenario(BuildContext ctx) async {
   await field.planVisit(salonId: s.id, at: DateTime(2026, 11, 2, 15, 30), purpose: 'Credit follow-up');
   final t = await field.saveTraining(title: 'Colour Mastery: Level 2', description: 'Toning, balayage and correction.', location: 'HOLA Academy, Gulberg', at: DateTime(2026, 11, 5, 11), durationMin: 180, seats: 12);
   ids.training = t.id;
+  // A finished session the salon took part in, so certificates exist.
+  clock = () => DateTime(2026, 10, 20, 9);
+  final pt = await field.saveTraining(title: 'Balayage Essentials', description: 'Hand-painted lightening.', location: 'HOLA Academy, Gulberg', at: DateTime(2026, 10, 22, 11), durationMin: 240, seats: 10);
+  ids.pastTraining = pt.id;
+  await as('owner@t.pk');
+  final ownerId = auth.current!.id;
+  await field.enrol(pt.id);
+  await field.enrol(pt.id, personId: ayesha.id);
+  clock = () => DateTime(2026, 11, 2, 11);
+  await field.enrol(t.id, personId: ayesha.id);
+  await as('officer@t.pk');
+  clock = () => DateTime(2026, 10, 22, 16);
+  await field.completeTraining(pt.id, [ownerId, ayesha.id]);
+  clock = () => DateTime(2026, 11, 2, 11);
 
   await up(Role.customer, 'Mariam Siddiqui', 'cust@t.pk');
   final a = await book.book(salonId: s.id, branchId: ids.branch, serviceIds: [cut.id], start: DateTime(2026, 11, 2, 16));
@@ -106,17 +130,20 @@ Future<Ids> scenario(BuildContext ctx) async {
 }
 
 void main() {
+  // Settings live in SharedPreferences; tests use an in-memory store.
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   setUpAll(() async {
     Sfx.enabled = false;
     // Tests have no system font fallback, so Urdu would render as boxes. For a
     // readable Urdu review on a Mac, draw all text with a font that has both scripts.
     const both = '/System/Library/Fonts/Supplemental/Arial Unicode.ttf';
     if (lang == 'ur' && File(both).existsSync()) {
-      for (final family in ['InstrumentSans', 'DMSerifDisplay']) {
+      for (final family in ['InstrumentSans', 'Montserrat']) {
         await (FontLoader(family)..addFont(File(both).readAsBytes().then((b) => ByteData.view(b.buffer)))).load();
       }
     } else {
       await (FontLoader('InstrumentSans')..addFont(rootBundle.load('assets/fonts/InstrumentSans.ttf'))).load();
+      await (FontLoader('Montserrat')..addFont(rootBundle.load('assets/fonts/Montserrat-600.ttf'))).load();
     }
   });
 
@@ -126,7 +153,7 @@ void main() {
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(MultiProvider(providers: appProviders(storage: MemoryStorage('{"prefs":{"sound":false,"theme":"${dark ? 'dark' : 'light'}","language":"$lang"}}')), child: const HolaApp()));
+    await tester.pumpWidget(MultiProvider(providers: appProviders(storage: MemoryStorage('{"prefs":{"permissionsAsked":true,"sound":false,"theme":"${dark ? 'dark' : 'light'}","language":"$lang"}}')), child: const HolaApp()));
     // Step through the animated splash frame by frame so it plays out and leaves.
     for (var i = 0; i < 40; i++) {
       await tester.pump(const Duration(milliseconds: 100));
@@ -179,8 +206,11 @@ void main() {
     await page('27_owner_orders', SalonOrdersPage(salonId: ids.salon));
     await page('28_owner_new_order', NewOrderPage(salonId: ids.salon));
 
-    await signIn('staff@t.pk');
-    await tabs('30_staff');
+    await page('29_owner_training', const TrainingListPage());
+    await page('29_owner_training_session', TrainingPage(id: ids.training));
+    await page('29_owner_certificate', CertificatePage(trainingId: ids.pastTraining, personId: ids.ayesha));
+    await page('29_owner_member', MemberPage(id: ids.ayesha));
+    await page('29_owner_permissions', const PermissionsPage());
 
     await signIn('officer@t.pk');
     await tabs('40_officer');

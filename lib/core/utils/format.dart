@@ -45,7 +45,12 @@ String fmtTime(DateTime d) => fmtMin(d.hour * 60 + d.minute);
 /// "Today", "Tomorrow", "Yesterday" or "Wed, 4 Nov".
 String dayLabel(DateTime d, DateTime today) {
   final diff = DateTime(d.year, d.month, d.day).difference(today).inDays;
-  return switch (diff) { 0 => tr('Today'), 1 => tr('Tomorrow'), -1 => tr('Yesterday'), _ => dLabel(d) };
+  return switch (diff) {
+    0 => tr('Today'),
+    1 => tr('Tomorrow'),
+    -1 => tr('Yesterday'),
+    _ => dLabel(d),
+  };
 }
 
 /// "just now", "5 min ago", "3 h ago", "2 days ago", then the date.

@@ -11,9 +11,16 @@ Map<String, (String, String, bool)> get statusLabels => {
   'CANCELLED_BY_CUSTOMER': (tr('Cancelled by client'), 'bad', false), 'CANCELLED_BY_SALON': (tr('Cancelled by salon'), 'bad', false), 'NO_SHOW': (tr('No-show'), 'bad', false),
   // Trade orders
   'PLACED': (tr('Placed'), 'info', false), 'UNDER_REVIEW': (tr('Credit review'), 'warn', false), 'APPROVED': (tr('Approved'), 'info', false), 'DISPATCHED': (tr('Dispatched'), 'info', false),
-  'OUT_FOR_DELIVERY': (tr('Out for delivery'), 'warn', true), 'DELIVERED': (tr('Delivered'), 'ok', false), 'CANCELLED': (tr('Cancelled'), 'bad', false), 'FAILED_DELIVERY': (tr('Delivery failed'), 'bad', false),
+  'OUT_FOR_DELIVERY': (tr('Out for delivery'), 'warn', true),
+  'DELIVERED': (tr('Delivered'), 'ok', false),
+  'CANCELLED': (tr('Cancelled'), 'bad', false),
+  'FAILED_DELIVERY': (tr('Delivery failed'), 'bad', false),
+  'PROCESSING': (tr('Processing'), 'info', false), 'RETURNED': (tr('Returned'), 'bad', false),
   // Salons
-  'PENDING_VERIFICATION': (tr('Pending verification'), 'warn', false), 'CHANGES_REQUESTED': (tr('Changes requested'), 'bad', false), 'ACTIVE': (tr('Active'), 'ok', false), 'SUSPENDED': (tr('Suspended'), 'bad', false),
+  'PENDING_VERIFICATION': (tr('Pending verification'), 'warn', false),
+  'CHANGES_REQUESTED': (tr('Changes requested'), 'bad', false),
+  'ACTIVE': (tr('Active'), 'ok', false),
+  'SUSPENDED': (tr('Suspended'), 'bad', false),
   // Visits, leave, training, complaints, cash
   'PLANNED': (tr('Planned'), 'mute', false), 'PENDING': (tr('Pending'), 'warn', false), 'SCHEDULED': (tr('Scheduled'), 'info', false),
   'OPEN': (tr('Open'), 'warn', false), 'RESOLVED': (tr('Resolved'), 'ok', false),

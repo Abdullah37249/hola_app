@@ -36,7 +36,8 @@ const Map<String, String> urSalon2 = {
   'What happens next': 'آگے کیا ہوگا',
   'Add your services and prices in Menu. Clients can book you from then on.': 'مینو میں اپنی سروسز اور قیمتیں شامل کریں۔ اس کے بعد کلائنٹس آپ کی بکنگ کر سکیں گے۔',
   'Add your team and their working hours in Team.': 'ٹیم میں اپنی ٹیم اور ان کے کام کے اوقات شامل کریں۔',
-  'A HOLA sales officer verifies your salon: you get the Verified badge and product ordering.': 'HOLA کا سیلز آفیسر آپ کے سیلون کی تصدیق کرتا ہے: آپ کو تصدیق شدہ بیج اور پروڈکٹ آرڈر کرنے کی سہولت ملتی ہے۔',
+  'A HOLA sales officer verifies your salon: you get the Verified badge and product ordering.':
+      'HOLA کا سیلز آفیسر آپ کے سیلون کی تصدیق کرتا ہے: آپ کو تصدیق شدہ بیج اور پروڈکٹ آرڈر کرنے کی سہولت ملتی ہے۔',
   'Your salon': 'آپ کا سیلون',
   'Location': 'مقام',
   'Review': 'جائزہ',
@@ -112,7 +113,8 @@ const Map<String, String> urSalon2 = {
   'Your salon owner sets these hours.': 'یہ اوقات آپ کے سیلون کے مالک مقرر کرتے ہیں۔',
   'Leave': 'چھٹی',
   'No leave yet': 'ابھی کوئی چھٹی نہیں',
-  'Request days off and your salon owner will approve them. You won’t be booked on approved days.': 'چھٹی کے دنوں کی درخواست دیں، آپ کے سیلون کے مالک انہیں منظور کریں گے۔ منظور شدہ دنوں میں آپ کی بکنگ نہیں ہوگی۔',
+  'Request days off and your salon owner will approve them. You won’t be booked on approved days.':
+      'چھٹی کے دنوں کی درخواست دیں، آپ کے سیلون کے مالک انہیں منظور کریں گے۔ منظور شدہ دنوں میں آپ کی بکنگ نہیں ہوگی۔',
   'Pick a date': 'تاریخ منتخب کریں',
   'Your salon owner is notified and approves it.': 'آپ کے سیلون کے مالک کو اطلاع دی جائے گی اور وہ اسے منظور کریں گے۔',
   'First day': 'پہلا دن',
@@ -237,8 +239,10 @@ const Map<String, String> urSalon2 = {
   'Sent to HOLA for review': 'جائزے کے لیے HOLA کو بھیج دیا گیا',
   'Live for clients': 'کلائنٹس کے لیے لائیو',
   'Add a service to go live': 'لائیو ہونے کے لیے سروس شامل کریں',
-  'Clients can find and book {name}. HOLA verification is pending: it adds a Verified badge and unlocks product orders.': 'کلائنٹس {name} کو تلاش اور بک کر سکتے ہیں۔ HOLA کی تصدیق ابھی باقی ہے: اس سے تصدیق شدہ بیج ملتا ہے اور پروڈکٹ آرڈرز کھل جاتے ہیں۔',
-  'Clients can find you as soon as your menu has a service. HOLA verification adds a Verified badge later.': 'آپ کے مینو میں سروس شامل ہوتے ہی کلائنٹس آپ کو تلاش کر سکیں گے۔ HOLA کی تصدیق سے بعد میں تصدیق شدہ بیج مل جاتا ہے۔',
+  'Clients can find and book {name}. HOLA verification is pending: it adds a Verified badge and unlocks product orders.':
+      'کلائنٹس {name} کو تلاش اور بک کر سکتے ہیں۔ HOLA کی تصدیق ابھی باقی ہے: اس سے تصدیق شدہ بیج ملتا ہے اور پروڈکٹ آرڈرز کھل جاتے ہیں۔',
+  'Clients can find you as soon as your menu has a service. HOLA verification adds a Verified badge later.':
+      'آپ کے مینو میں سروس شامل ہوتے ہی کلائنٹس آپ کو تلاش کر سکیں گے۔ HOLA کی تصدیق سے بعد میں تصدیق شدہ بیج مل جاتا ہے۔',
   'Services and prices': 'سروسز اور قیمتیں',
   'Team working hours': 'ٹیم کے کام کے اوقات',
   'Opening hours': 'اوقاتِ کار',

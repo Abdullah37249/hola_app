@@ -1,4 +1,5 @@
 import 'account.dart';
+import 'geo.dart';
 import 'json.dart';
 
 /// Salon lifecycle (subset of the HOLA workflow that makes sense on-device).
@@ -24,6 +25,13 @@ class Salon {
   int creditLimit, creditDays;
   final DateTime createdAt;
 
+  /// Comes from the HOLA server (read-only on the phone until salon editing
+  /// and bookings are connected).
+  final bool hola;
+
+  /// The owner to call, as HOLA sends it with a delivery (rider app only).
+  String? ownerName, ownerPhone;
+
   Salon({
     required this.id,
     required this.ownerId,
@@ -39,6 +47,7 @@ class Salon {
     this.noShowGraceMin = 15,
     this.creditLimit = 0,
     this.creditDays = 30,
+    this.hola = false,
     required this.createdAt,
   }) : photos = photos ?? [];
 
@@ -46,38 +55,93 @@ class Salon {
 
   /// Verified by HOLA: shows the badge and unlocks trade ordering.
   bool get isActive => status == SalonStatus.active;
+
   /// Customers can find and book it (everything except a suspended salon).
   bool get isListed => status != SalonStatus.suspended;
 
   Json toJson() => {
-        'id': id, 'ownerId': ownerId, 'name': name, 'phone': phone, 'about': about, 'status': status, 'statusNote': statusNote, 'palette': palette, 'photos': photos,
-        'autoConfirm': autoConfirm, 'cancelWindowHours': cancelWindowHours, 'noShowGraceMin': noShowGraceMin, 'creditLimit': creditLimit, 'creditDays': creditDays,
-        'createdAt': iso(createdAt),
-      };
+    'id': id,
+    'ownerId': ownerId,
+    'name': name,
+    'phone': phone,
+    'about': about,
+    'status': status,
+    'statusNote': statusNote,
+    'palette': palette,
+    'photos': photos,
+    'autoConfirm': autoConfirm,
+    'cancelWindowHours': cancelWindowHours,
+    'noShowGraceMin': noShowGraceMin,
+    'creditLimit': creditLimit,
+    'creditDays': creditDays,
+    'createdAt': iso(createdAt),
+    'hola': hola,
+    if (ownerName != null) 'ownerName': ownerName,
+    if (ownerPhone != null) 'ownerPhone': ownerPhone,
+  };
 
-  factory Salon.fromJson(Json j) => Salon(
-        id: j['id'], ownerId: j['ownerId'], name: j['name'], phone: j['phone'] ?? '', about: j['about'] ?? '', status: j['status'], statusNote: j['statusNote'],
-        palette: asInt(j['palette']), photos: [for (final p in (j['photos'] as List? ?? const [])) p as String], autoConfirm: j['autoConfirm'] ?? false, cancelWindowHours: asInt(j['cancelWindowHours'], 2), noShowGraceMin: asInt(j['noShowGraceMin'], 15),
-        creditLimit: asInt(j['creditLimit']), creditDays: asInt(j['creditDays'], 30), createdAt: dt(j['createdAt'])!,
-      );
+  factory Salon.fromJson(Json j) =>
+      Salon(
+          id: j['id'],
+          ownerId: j['ownerId'],
+          name: j['name'],
+          phone: j['phone'] ?? '',
+          about: j['about'] ?? '',
+          status: j['status'],
+          statusNote: j['statusNote'],
+          palette: asInt(j['palette']),
+          photos: [for (final p in (j['photos'] as List? ?? const [])) p as String],
+          autoConfirm: j['autoConfirm'] ?? false,
+          cancelWindowHours: asInt(j['cancelWindowHours'], 2),
+          noShowGraceMin: asInt(j['noShowGraceMin'], 15),
+          creditLimit: asInt(j['creditLimit']),
+          creditDays: asInt(j['creditDays'], 30),
+          hola: j['hola'] ?? false,
+          createdAt: dt(j['createdAt'])!,
+        )
+        ..ownerName = j['ownerName']
+        ..ownerPhone = j['ownerPhone'];
 }
 
 class Branch {
   final String id, salonId;
   String name, address, area, city;
+
+  /// Where the branch is (GPS captured at the door), for riders' navigation.
+  GeoFix? location;
+
+  /// HOLA's ready Google Maps directions link (GPS, or the address when none).
+  String? mapsUrl;
+
   /// Opening hours indexed by weekday 1 (Mon) .. 7 (Sun); null = closed.
   final List<Shift?> hours;
 
-  Branch({required this.id, required this.salonId, required this.name, required this.address, required this.area, required this.city, List<Shift?>? hours})
-      : hours = hours ?? [for (var i = 0; i < 7; i++) i == 6 ? null : const Shift(10 * 60, 20 * 60)];
+  Branch({required this.id, required this.salonId, required this.name, required this.address, required this.area, required this.city, List<Shift?>? hours, this.location})
+    : hours = hours ?? [for (var i = 0; i < 7; i++) i == 6 ? null : const Shift(10 * 60, 20 * 60)];
 
   Shift? hoursOn(DateTime d) => hours[d.weekday - 1];
 
-  Json toJson() => {'id': id, 'salonId': salonId, 'name': name, 'address': address, 'area': area, 'city': city, 'hours': [for (final h in hours) h?.toJson()]};
+  Json toJson() => {
+    'id': id,
+    'salonId': salonId,
+    'name': name,
+    'address': address,
+    'area': area,
+    'city': city,
+    'hours': [for (final h in hours) h?.toJson()],
+    if (location != null) 'location': location!.toJson(),
+    if (mapsUrl != null) 'mapsUrl': mapsUrl,
+  };
   factory Branch.fromJson(Json j) => Branch(
-        id: j['id'], salonId: j['salonId'], name: j['name'], address: j['address'] ?? '', area: j['area'] ?? '', city: j['city'] ?? '',
-        hours: [for (final h in (j['hours'] as List)) h == null ? null : Shift.fromJson(h as Json)],
-      );
+    id: j['id'],
+    salonId: j['salonId'],
+    name: j['name'],
+    address: j['address'] ?? '',
+    area: j['area'] ?? '',
+    city: j['city'] ?? '',
+    hours: [for (final h in (j['hours'] as List)) h == null ? null : Shift.fromJson(h as Json)],
+    location: GeoFix.fromJson(j['location']),
+  )..mapsUrl = j['mapsUrl'];
 }
 
 class ServiceItem {
@@ -90,7 +154,13 @@ class ServiceItem {
 
   Json toJson() => {'id': id, 'salonId': salonId, 'name': name, 'category': category, 'description': description, 'price': price, 'durationMin': durationMin, 'active': active};
   factory ServiceItem.fromJson(Json j) => ServiceItem(
-        id: j['id'], salonId: j['salonId'], name: j['name'], category: j['category'], description: j['description'] ?? '', price: asInt(j['price']),
-        durationMin: asInt(j['durationMin']), active: j['active'] ?? true,
-      );
+    id: j['id'],
+    salonId: j['salonId'],
+    name: j['name'],
+    category: j['category'],
+    description: j['description'] ?? '',
+    price: asInt(j['price']),
+    durationMin: asInt(j['durationMin']),
+    active: j['active'] ?? true,
+  );
 }

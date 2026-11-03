@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "82279936528",
+    "project_id": "hola-application-e0e7a",
+    "storage_bucket": "hola-application-e0e7a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:82279936528:android:b15ae0af8be8cc213d1095",
+        "android_client_info": {
+          "package_name": "com.metaxperts.hola"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAo_uZyHGL-aU30uDXP4ounDBprtph-css"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

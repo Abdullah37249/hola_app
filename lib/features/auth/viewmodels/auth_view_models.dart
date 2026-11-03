@@ -69,10 +69,10 @@ class SignUpViewModel extends ViewModel {
     notify();
   }
 
-  Future<Account> submit({required String name, required String email, required String phone, required String city}) {
+  Future<Account> submit({required String name, required String email, required String phone, required String city, SalonDraft? salon}) {
     if (role == null) throw DomainError(tr('Choose how you will use HOLA.'));
     if (!terms) throw DomainError(tr('Please accept the terms to continue.'), field: 'terms');
-    return _auth.signUp(role: role!, name: name, email: email, phone: phone, password: password, city: city);
+    return _auth.signUp(role: role!, name: name, email: email, phone: phone, password: password, city: city, salon: salon);
   }
 }
 

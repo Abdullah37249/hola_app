@@ -11,10 +11,14 @@ import 'package:hola_professional/domain/repositories/repositories.dart';
 import 'package:hola_professional/main.dart';
 import 'package:hola_professional/shared/widgets/ui.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hola_professional/data/local/local_auth_repository.dart';
 
 /// Boots the app on an in-memory database, signs up each role for real and
 /// opens every tab, on a typical phone, a small phone and with large text.
 void main() {
+  // Settings live in SharedPreferences; tests use an in-memory store.
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   setUpAll(() async {
     Sfx.enabled = false;
     // Use the real font so layout widths match the device.
@@ -22,23 +26,28 @@ void main() {
     await font.load();
   });
 
-  const screens = [
-    ('phone', Size(1170, 2532), 3.0, 1.0),
-    ('small', Size(1080, 1920), 3.0, 1.0),
-    ('large text', Size(1170, 2532), 3.0, 1.3),
-  ];
+  const screens = [('phone', Size(1170, 2532), 3.0, 1.0), ('small', Size(1080, 1920), 3.0, 1.0), ('large text', Size(1170, 2532), 3.0, 1.3)];
   const pw = 'secret-pass-1';
 
   /// Signs up [role] (plus whatever it needs to have a populated experience).
   Future<void> prepare(BuildContext ctx, Role role) async {
     final auth = ctx.read<AuthRepository>(), salons = ctx.read<SalonRepository>();
-    Future<void> up(Role r, String email) => auth.signUp(role: r, name: 'Test ${r.name}', email: email, phone: '0300 1234567', password: pw, city: 'Lahore');
+    // Officers and riders come from HOLA: create them, then sign in like the app does.
+    Future<void> up(Role r, String email) async {
+      if (Role.signUp.contains(r)) {
+        await auth.signUp(role: r, name: 'Test ${r.name}', email: email, phone: '0300 1234567', password: pw, city: 'Lahore');
+      } else {
+        await (auth as LocalAuthRepository).provision(role: r, name: 'Test ${r.name}', email: email, phone: '0300 1234567', password: pw, city: 'Lahore');
+        await auth.signIn(email, pw);
+      }
+    }
+
     // An active salon with a service and a staff member exists in every scenario.
     await up(Role.salesOfficer, 'officer@t.pk');
     await up(Role.salonOwner, 'owner@t.pk');
     final s = await salons.createSalon(name: 'Maison Test', phone: '0300 1112223', about: 'Hair and colour.', branchName: 'Main', address: '1 Main Blvd', area: 'Gulberg', city: 'Lahore');
     await salons.saveService(salonId: s.id, name: 'Cut & blow-dry', category: 'Hair', description: '', price: 3500, durationMin: 60);
-    await salons.addStaff(s.id, name: 'Test Staff', email: 'staff@t.pk', phone: '0300 2223334', password: pw, title: 'Stylist');
+    await salons.addStaff(s.id, name: 'Test Staff', phone: '0300 2223334', title: 'Stylist');
     await auth.signIn('officer@t.pk', pw);
     await salons.approveSalon(s.id);
     switch (role) {
@@ -47,11 +56,13 @@ void main() {
       case Role.salonOwner:
         await auth.signIn('owner@t.pk', pw);
       case Role.salonStaff:
-        await auth.signIn('staff@t.pk', pw);
+        break; // team members don't sign in
       case Role.salesOfficer:
         break;
       case Role.rider:
         await up(Role.rider, 'rider@t.pk');
+      case Role.trainer:
+        await up(Role.trainer, 'trainer@t.pk');
     }
   }
 
@@ -59,16 +70,21 @@ void main() {
     tester.view.physicalSize = const Size(1170, 2532);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MultiProvider(providers: appProviders(storage: MemoryStorage()), child: const HolaApp()));
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: appProviders(storage: MemoryStorage()),
+        child: const HolaApp(),
+      ),
+    );
     for (var i = 0; i < 40; i++) {
       await tester.pump(const Duration(milliseconds: 100)); // splash
     }
     await tester.tap(find.text('Create an account'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.text('Customer'));
     await tester.pump();
     await tester.tap(find.text('Continue as customer'));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     Finder input(String label) => find.descendant(of: find.widgetWithText(HField, label), matching: find.byType(TextFormField));
     await tester.enterText(input('Full name'), 'Test Customer');
@@ -94,7 +110,7 @@ void main() {
   });
 
   for (final (screen, size, dpr, scale) in screens) {
-    for (final role in Role.values) {
+    for (final role in Role.values.where((r) => r != Role.salonStaff)) {
       testWidgets('renders every tab: ${role.name} on $screen', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = dpr;
@@ -111,7 +127,12 @@ void main() {
         };
         addTearDown(() => FlutterError.onError = report);
 
-        await tester.pumpWidget(MultiProvider(providers: appProviders(storage: MemoryStorage()), child: const HolaApp()));
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: appProviders(storage: MemoryStorage()),
+            child: const HolaApp(),
+          ),
+        );
         await tester.pump(const Duration(seconds: 3)); // splash + DB load
         final ctx = tester.element(find.byType(HolaApp));
         await tester.runAsync(() => prepare(ctx, role));
@@ -130,5 +151,13 @@ void main() {
         await tester.pump(const Duration(seconds: 5));
       });
     }
+  }
+}
+
+/// The glowing ring never stops turning, so wait a fixed second instead of
+/// for all animation to end.
+Future<void> settle(WidgetTester tester) async {
+  for (var i = 0; i < 10; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
   }
 }

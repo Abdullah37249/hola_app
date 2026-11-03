@@ -8,7 +8,7 @@ import '../../../shared/widgets/ui.dart';
 
 /// Native launch colour (android `launch_navy`): the first frame matches it
 /// exactly, so the hand-off from the system splash is invisible.
-const kLaunchNavy = Color(0xFF0B3566);
+const kLaunchNavy = Color(0xFF000000);
 
 /// Animated brand splash: the band gradient blooms out of the launch colour,
 /// the logo springs in from a blur with two ripples, a shine sweeps across it,
@@ -74,7 +74,6 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final (g, glow, _) = G.band('customer');
     return IgnorePointer(
       ignoring: _out.value > 0,
       child: AnimatedBuilder(
@@ -89,6 +88,7 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
           final tag = _seg(.55, .85);
           final bar = _seg(.35, 1, Curves.easeInOutCubic);
           final d = Curves.easeInOut.transform(_drift.value);
+          final ring = _seg(.05, .7, Curves.easeInOutCubic);
           return Opacity(
             opacity: 1 - out,
             child: Transform.scale(
@@ -98,26 +98,14 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
                 alignment: Alignment.center,
                 children: [
                   const ColoredBox(color: kLaunchNavy),
+                  // Night sky blooms out of the launch colour…
                   Opacity(
                     opacity: bloom,
-                    child: DecoratedBox(decoration: BoxDecoration(gradient: g)),
+                    child: const CustomPaint(painter: GlowRingPainter(progress: 0)),
                   ),
-                  // drifting glows: brand blue top-right, HOLA orange bottom-left
-                  Opacity(
-                    opacity: bloom,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(center: Alignment(.9 - .2 * d, -1.0 + .15 * d), radius: 1.1, colors: [glow.withValues(alpha: .5), glow.withValues(alpha: 0)]),
-                      ),
-                    ),
-                  ),
-                  Opacity(
-                    opacity: bloom,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(center: Alignment(-1.0 + .25 * d, 1.05 - .1 * d), radius: .9, colors: [const Color(0xFFFF8A00).withValues(alpha: .28), const Color(0x00FF8A00)]),
-                      ),
-                    ),
+                  // …then the HOLA Circle draws itself in around the logo.
+                  CustomPaint(
+                    painter: GlowRingPainter(sky: false, center: const Alignment(0, -.06), scale: .46, progress: ring, phase: .08 * d, intensity: .6 + .4 * ring),
                   ),
                   Center(
                     child: Column(
@@ -130,8 +118,8 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
                             alignment: Alignment.center,
                             clipBehavior: Clip.none,
                             children: [
-                              _Ripple(t: _seg(.12, .75), color: const Color(0xFF5E9BD6)),
-                              _Ripple(t: _seg(.24, .9), color: const Color(0xFFFF8A00)),
+                              _Ripple(t: _seg(.12, .75), color: const Color(0xFF6FB0FF)),
+                              _Ripple(t: _seg(.24, .9), color: const Color(0xFFBFE0FF)),
                               Opacity(
                                 opacity: logoFade,
                                 child: Transform.scale(
@@ -239,7 +227,7 @@ class _Shine extends StatelessWidget {
       shaderCallback: (r) => LinearGradient(
         begin: Alignment(x - .5, -1),
         end: Alignment(x + .5, 1),
-        colors: const [Color(0x00FFB866), Color(0xFFFFB866), Color(0x00FFB866)], // warm glint: the logo itself is white
+        colors: const [Color(0x006FB0FF), Color(0xFF9CCBFF), Color(0x006FB0FF)], // blue glint: the logo itself is white
         stops: const [.35, .5, .65],
       ).createShader(r),
       child: child,

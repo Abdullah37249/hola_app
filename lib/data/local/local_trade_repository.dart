@@ -1,12 +1,31 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+
 import '../../core/l10n/l10n.dart';
+import '../../core/network/api.dart';
 import '../../core/utils/clock.dart';
 import '../../core/utils/format.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
+import 'hola_mirror.dart' show branchGeo, money;
 import 'local_auth_repository.dart';
 
 class LocalTradeRepository extends LocalRepository implements TradeRepository {
-  LocalTradeRepository(super.db);
+  LocalTradeRepository(super.db, {this.api});
+
+  /// The HOLA server; null keeps everything on the device (widget tests).
+  final HolaApi? api;
+  Future<void>? _syncing;
+
+  /// The salon's HOLA credit account as the server reports it.
+  final _serverCredit = <String, CreditSummary>{};
+
+  /// The salon's payment requests as the server reports them (newest first).
+  final _payRequests = <String, List<PaymentRequest>>{};
+
+  /// The salon's credit statement as the server reports it (newest first).
+  final _serverStatement = <String, List<CreditEntry>>{};
 
   TradeOrder _order(String id) => order(id) ?? (throw DomainError(tr('Order not found.')));
   Salon _salon(String id) => db.salons.where((s) => s.id == id).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
@@ -15,13 +34,52 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   // ── catalogue ──
 
   @override
-  List<Product> products({bool activeOnly = true}) => db.products.where((p) => !activeOnly || p.active).toList()..sort((a, b) => a.name.compareTo(b.name));
+  Future<void> syncCatalogue() => api == null ? Future.value() : (_syncing ??= _syncCatalogue().whenComplete(() => _syncing = null));
+
+  /// Copies GET /catalog/trade into the device database. Signed-in salon only.
+  Future<void> _syncCatalogue() async {
+    if (me?.role != Role.salonOwner || !await api!.hasSession) return;
+    try {
+      final res = await api!.get('/catalog/trade');
+      final items = (res is Map ? (res['data'] as List? ?? const []) : res as List).cast<Map>();
+      final seen = <String>{};
+      for (final (i, j) in items.indexed) {
+        final p = mirrorProduct(j, i);
+        seen.add(p.id);
+        final at = db.products.indexWhere((x) => x.id == p.id);
+        at < 0 ? db.products.add(p) : db.products[at] = p;
+      }
+      // Products HOLA no longer sells leave the catalogue.
+      db.products.removeWhere((p) => p.hola && !seen.contains(p.id));
+      db.commit();
+    } catch (_) {
+      // Offline or not allowed: keep the last catalogue.
+    }
+  }
+
+  @override
+  List<Product> products({bool activeOnly = true}) {
+    // Once HOLA's server catalogue has arrived, it is the only catalogue.
+    final fromHola = db.products.any((p) => p.hola);
+    return db.products.where((p) => (!activeOnly || p.active) && (!fromHola || p.hola)).toList()..sort((a, b) => a.name.compareTo(b.name));
+  }
 
   @override
   Product? product(String id) => db.products.where((p) => p.id == id).firstOrNull;
 
   @override
-  Future<Product> saveProduct({String? id, required String name, required String category, required String description, required int color, required String shape, required List<Variant> variants, required int schemeBuy, required int schemeFree, bool active = true}) async {
+  Future<Product> saveProduct({
+    String? id,
+    required String name,
+    required String category,
+    required String description,
+    required int color,
+    required String shape,
+    required List<Variant> variants,
+    required int schemeBuy,
+    required int schemeFree,
+    bool active = true,
+  }) async {
     requireRole({Role.salesOfficer});
     if (name.trim().length < 2) throw DomainError(tr('Enter the product name.'));
     if (!productCategories.contains(category)) throw DomainError(tr('Pick a category.'));
@@ -49,7 +107,19 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       db.commit();
       return existing;
     }
-    final p = Product(id: db.newId(), name: name.trim(), category: category, description: description.trim(), color: color, shape: shape, variants: variants, schemeBuy: schemeBuy, schemeFree: schemeFree, active: active, createdAt: now());
+    final p = Product(
+      id: db.newId(),
+      name: name.trim(),
+      category: category,
+      description: description.trim(),
+      color: color,
+      shape: shape,
+      variants: variants,
+      schemeBuy: schemeBuy,
+      schemeFree: schemeFree,
+      active: active,
+      createdAt: now(),
+    );
     db.products.add(p);
     db.commit();
     return p;
@@ -72,17 +142,54 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
 
   @override
   List<OrderLine> quote(List<CartLine> cart) => [
-        for (final c in cart)
-          if (c.qty > 0)
-            () {
-              final p = product(c.productId)!;
-              final v = _variant(c.productId, c.variantId);
-              return OrderLine(productId: p.id, variantId: v.id, name: p.variants.length > 1 ? '${p.name} · ${v.name}' : p.name, qty: c.qty, freeQty: p.freeFor(c.qty), unitPrice: v.tradePrice);
-            }(),
-      ];
+    for (final c in cart)
+      if (c.qty > 0)
+        () {
+          final p = product(c.productId)!;
+          final v = _variant(c.productId, c.variantId);
+          return OrderLine(productId: p.id, variantId: v.id, name: p.variants.length > 1 ? '${p.name} · ${v.name}' : p.name, qty: c.qty, freeQty: p.freeFor(c.qty), unitPrice: v.tradePrice);
+        }(),
+  ];
 
   @override
-  Future<TradeOrder> placeOrder({required String salonId, required List<CartLine> cart, required PaymentMethod payment, String notes = ''}) async {
+  Future<OrderQuote> quoteWithCoupon({required String salonId, required List<CartLine> cart, required String couponCode}) async {
+    final code = couponCode.trim().toUpperCase();
+    if (!RegExp(r'^[A-Z0-9-]{4,24}$').hasMatch(code)) throw DomainError(tr('Enter the coupon code as it is written (4–24 letters or numbers).'), field: 'couponCode');
+    final lines = quote(cart);
+    if (lines.isEmpty) throw DomainError(tr('Your cart is empty.'));
+    if (api == null || !lines.every((l) => product(l.productId)?.hola ?? false)) throw DomainError(tr('Coupons work on HOLA products only.'), field: 'couponCode');
+    try {
+      final j =
+          await api!.post('/salons/$salonId/orders/quote', {
+                'items': [
+                  for (final l in lines) {'variantId': l.variantId, 'qty': l.qty},
+                ],
+                'couponCode': code,
+              })
+              as J;
+      final c = j['coupon'] as Map?;
+      if (c == null) throw DomainError(tr('This coupon can’t be used on this order.'), field: 'couponCode');
+      // discount = scheme discounts + coupon; total = subtotal − discount.
+      final total = money(j['total']);
+      return OrderQuote(
+        subtotal: j['subtotal'] == null ? total + money(j['discount']) : money(j['subtotal']),
+        discount: money(c['discount']),
+        total: total,
+        couponCode: '${c['code'] ?? code}',
+        campaign: c['campaign']?.toString(),
+        offer: c['offer']?.toString(),
+      );
+    } on ApiError catch (e) {
+      throw _couponError(e);
+    }
+  }
+
+  /// HOLA's coupon refusal (not valid, not running, used up…) under the field.
+  DomainError _couponError(ApiError e) =>
+      e.code == 'COUPON_INVALID' ? DomainError(e.fields.values.firstOrNull ?? (e.detail.isEmpty ? tr('This coupon can’t be used.') : e.detail), field: 'couponCode') : apiToDomain(e);
+
+  @override
+  Future<TradeOrder> placeOrder({required String salonId, required List<CartLine> cart, required PaymentMethod payment, String notes = '', String? couponCode}) async {
     requireRole({Role.salonOwner, Role.salesOfficer});
     final me = requireMe;
     final s = _salon(salonId);
@@ -90,6 +197,37 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     if (!s.isActive) throw DomainError(tr('Trade ordering opens once HOLA verifies the salon.'));
     final lines = quote(cart);
     if (lines.isEmpty) throw DomainError(tr('Your cart is empty.'));
+    // HOLA's catalogue: the order goes to the server, which prices it and reserves stock.
+    if (api != null && lines.every((l) => product(l.productId)?.hola ?? false)) {
+      final branch = db.branches.where((b) => b.salonId == salonId).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
+      try {
+        final res =
+            await api!.post(
+                  '/salons/$salonId/orders',
+                  {
+                    'branchId': branch.id,
+                    'paymentMethod': payment == PaymentMethod.credit ? 'CREDIT' : 'COD',
+                    'items': [
+                      for (final l in lines) {'variantId': l.variantId, 'qty': l.qty},
+                    ],
+                    if (notes.trim().isNotEmpty) 'notes': notes.trim(),
+                    if (couponCode != null && couponCode.isNotEmpty) 'couponCode': couponCode,
+                  },
+                  headers: {'Idempotency-Key': db.newId() + db.newId()},
+                )
+                as J;
+        final o = _mirrorOrder(res, salonId, fallback: lines, payment: payment, by: me.id);
+        db.commit();
+        // A credit order uses up credit: fetch the new balance.
+        if (payment == PaymentMethod.credit) syncCredit(salonId);
+        return o;
+      } on ApiError catch (e) {
+        if (e.code == 'INSUFFICIENT_STOCK') throw DomainError(tr('Some items are no longer in stock in that quantity. Lower the quantity and try again.'));
+        if (e.code == 'COUPON_INVALID') throw _couponError(e);
+        if (e.code == 'NOT_ORDERABLE') throw DomainError(tr('Some items can’t be ordered right now. Remove them and try again.'));
+        throw apiToDomain(e);
+      }
+    }
     for (final l in lines) {
       final v = _variant(l.productId, l.variantId);
       if (l.qty + l.freeQty > v.stock) throw DomainError(tr('Only {n} of {name} in stock.', {'n': v.stock, 'name': l.name}));
@@ -116,10 +254,443 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       db.credit.add(CreditEntry(id: db.newId(), salonId: salonId, kind: 'CHARGE', amount: total, ref: o.code, at: now()));
     }
     db.orders.add(o);
-    db.notifyRole(Role.salesOfficer, overLimit ? 'Order needs credit review' : 'New trade order', '{salon} · {code} · {amount}', args: {'salon': s.name, 'code': o.code, 'amount': rs(total)}, icon: 'box', link: _link(o));
-    if (me.role == Role.salesOfficer) db.notify(s.ownerId, 'Order placed for you', '{code} · {amount} by {name}', args: {'code': o.code, 'amount': rs(total), 'name': me.name}, icon: 'box', link: _link(o));
+    db.notifyRole(
+      Role.salesOfficer,
+      overLimit ? 'Order needs credit review' : 'New trade order',
+      '{salon} · {code} · {amount}',
+      args: {'salon': s.name, 'code': o.code, 'amount': rs(total)},
+      icon: 'box',
+      link: _link(o),
+    );
+    if (me.role == Role.salesOfficer) {
+      db.notify(s.ownerId, 'Order placed for you', '{code} · {amount} by {name}', args: {'code': o.code, 'amount': rs(total), 'name': me.name}, icon: 'box', link: _link(o));
+    }
     db.commit();
     return o;
+  }
+
+  /// Copies the salon's orders from the server (GET /salons/{id}/orders).
+  @override
+  Future<void> syncOrders(String salonId) async {
+    if (api == null || me?.role != Role.salonOwner || !(db.salons.where((s) => s.id == salonId).firstOrNull?.hola ?? false)) return;
+    try {
+      for (var page = 1, pages = 1; page <= pages; page++) {
+        final res = await api!.get('/salons/$salonId/orders', query: {'page': '$page', 'pageSize': '50'});
+        final list = (res is Map ? (res['data'] as List? ?? const []) : res as List).cast<J>();
+        if (res is Map) pages = asIntOr((res['meta'] as Map?)?['totalPages'] ?? 1);
+        for (final j in list) {
+          _mirrorOrder(j, salonId, fallback: const [], payment: '${j['paymentMethod']}' == 'CREDIT' ? PaymentMethod.credit : PaymentMethod.cod, by: '');
+        }
+      }
+      db.commit();
+    } catch (_) {
+      // Offline: keep the last copy.
+    }
+    // Credit separately, so a problem with one doesn't hide the other.
+    await syncCredit(salonId);
+  }
+
+  @override
+  Future<void> syncCredit(String salonId) async {
+    if (api == null || !{Role.salonOwner, Role.salesOfficer}.contains(me?.role)) return;
+    final s = db.salons.where((s) => s.id == salonId).firstOrNull;
+    if (s == null || !s.hola) return;
+    try {
+      final c = await api!.get('/salons/$salonId/credit') as J;
+      final last = c['lastPayment'] as Map?;
+      final limit = money(c['limit']);
+      _serverCredit[salonId] = CreditSummary(
+        limit: limit,
+        outstanding: c['outstanding'] == null ? limit - money(c['available']) : money(c['outstanding']),
+        // limit − outstanding − credit orders still waiting for approval.
+        available: money(c['available']),
+        overdue: money(c['overdue']),
+        days: asIntOr(c['creditDays']),
+        lastPayment: last == null ? 0 : money(last['amount']),
+        lastPaymentAt: last == null ? null : DateTime.tryParse('${last['date']}'),
+      );
+      s
+        ..creditLimit = limit
+        ..creditDays = c['creditDays'] == null ? s.creditDays : asIntOr(c['creditDays']);
+      db.commit();
+    } catch (e) {
+      debugPrint('Credit: sync failed: $e'); // offline: keep the last copy
+    }
+    try {
+      final all = <CreditEntry>[];
+      for (var page = 1, pages = 1; page <= pages && page <= 20; page++) {
+        final res = await api!.get('/salons/$salonId/credit/statement', query: {'page': '$page', 'pageSize': '100'});
+        final list = (res is Map ? (res['data'] ?? const []) as List : res as List).cast<Map>();
+        if (res is Map) pages = asIntOr((res['meta'] as Map?)?['totalPages'] ?? 1);
+        all.addAll([for (final j in list) ?_creditEntry(j, salonId)]);
+      }
+      _serverStatement[salonId] = all..sort((a, b) => b.at.compareTo(a.at));
+      db.commit();
+    } catch (e) {
+      debugPrint('Credit: statement failed: $e');
+    }
+  }
+
+  @override
+  List<PaymentRequest> paymentRequests(String salonId) => _payRequests[salonId] ?? const [];
+
+  /// GET /salons/{id}/coupons (contract 0.13.0).
+  static const salonCouponsLive = true;
+  final _coupons = <String, List<SalonCoupon>>{};
+
+  @override
+  List<SalonCoupon> coupons(String salonId) => _coupons[salonId] ?? const [];
+
+  @override
+  Future<void> syncCoupons(String salonId) async {
+    if (!salonCouponsLive || !_holaSalon(salonId) || me?.role != Role.salonOwner) return;
+    try {
+      // Without available=true HOLA also returns used/expired/upcoming (history).
+      final res = await api!.get('/salons/$salonId/coupons');
+      final list = (res is Map ? (res['data'] ?? const []) as List : res as List).cast<Map>();
+      _coupons[salonId] = [
+        for (final j in list)
+          SalonCoupon(
+            id: '${j['id']}',
+            code: '${j['code'] ?? ''}',
+            title: '${j['title'] ?? (j['campaign'] is Map ? (j['campaign'] as Map)['name'] : j['campaign']) ?? ''}',
+            campaign: '${j['campaign'] is Map ? (j['campaign'] as Map)['name'] ?? '' : j['campaign'] ?? ''}',
+            description: '${j['description'] ?? ''}',
+            discountText: '${j['discountText'] ?? ''}',
+            usesLeft: j['usesLeft'] == null ? null : asIntOr(j['usesLeft']),
+            products: [for (final p in (j['products'] as List? ?? const [])) p is Map ? '${p['name'] ?? ''}' : '$p'],
+            validUntil: DateTime.tryParse('${j['validUntil'] ?? ''}'),
+            validFrom: DateTime.tryParse('${j['validFrom'] ?? ''}'),
+            status: '${j['status'] ?? 'AVAILABLE'}'.toUpperCase(),
+          ),
+      ];
+      db.commit();
+    } catch (e) {
+      debugPrint('Coupons: sync failed: $e');
+    }
+  }
+
+  /// orderId → the credit payment the rider also collects on that delivery.
+  final _creditCollections = <String, CreditCollection>{};
+
+  @override
+  CreditCollection? creditCollectionFor(String orderId) => _creditCollections[orderId];
+
+  @override
+  Future<void> collectCredit(String requestId, int amount) async {
+    requireRole({Role.rider});
+    if (amount <= 0) throw DomainError(tr('Enter the cash you took.'), field: 'amount');
+    final asked = _creditCollections.values.where((c) => c.requestId == requestId).firstOrNull;
+    if (asked != null && amount > asked.amount) throw DomainError(tr('That is more than the salon is paying ({amount}).', {'amount': rs(asked.amount)}), field: 'amount');
+    try {
+      await api!.post('/rider/credit-collections/$requestId', {'amount': '$amount.00'}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
+    await syncDeliveries();
+    await syncCash();
+  }
+
+  @override
+  int payableNow(String salonId) {
+    final waiting = paymentRequests(salonId).where((r) => r.open).fold(0, (t, r) => t + (r.collectedAmount ?? r.amount));
+    final left = credit(salonId).outstanding - waiting;
+    return left < 0 ? 0 : left;
+  }
+
+  /// HOLA's payment-request endpoints are agreed but not live yet (contract
+  /// pending the owner's approval). Flip this once HOLA says they are on staging.
+  static const paymentRequestsLive = true; // contract 0.11.0
+
+  bool _holaSalon(String salonId) => api != null && (db.salons.where((s) => s.id == salonId).firstOrNull?.hola ?? false);
+
+  @override
+  Future<void> syncPaymentRequests(String salonId) async {
+    if (!paymentRequestsLive || !_holaSalon(salonId) || me?.role != Role.salonOwner) return;
+    try {
+      final res = await api!.get('/salons/$salonId/credit/payment-requests', query: {'page': '1', 'pageSize': '50'});
+      final list = (res is Map ? (res['data'] ?? const []) as List : res as List).cast<Map>();
+      _payRequests[salonId] = [for (final j in list) ?_payRequest(j, salonId)]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      db.commit();
+    } catch (e) {
+      debugPrint('Payments: sync failed: $e'); // not on the server yet, or offline
+    }
+  }
+
+  PaymentRequest? _payRequest(Map j, String salonId) {
+    final method = PayMethod.of('${j['method'] ?? ''}');
+    final at = DateTime.tryParse('${j['createdAt'] ?? ''}');
+    if (method == null || at == null) return null;
+    String? str(Object? v) => v == null || '$v'.isEmpty ? null : '$v';
+    final by = j['collectedBy'], decided = j['decidedBy'];
+    return PaymentRequest(
+      id: '${j['id']}',
+      code: '${j['code'] ?? ''}',
+      salonId: salonId,
+      method: method,
+      amount: money(j['amount']),
+      collectedAmount: j['collectedAmount'] == null ? null : money(j['collectedAmount']),
+      confirmedAmount: j['confirmedAmount'] == null ? null : money(j['confirmedAmount']),
+      status: '${j['status'] ?? 'PENDING'}'.toUpperCase(),
+      reference: '${j['reference'] ?? ''}',
+      note: '${j['note'] ?? ''}',
+      proofFileId: str(j['proofFileId']),
+      rejectReason: str(j['rejectReason']),
+      collectedBy: by is Map ? str(by['fullName']) : null,
+      decidedBy: decided is Map ? str(decided['fullName']) : null,
+      createdAt: at.toLocal(),
+      decidedAt: DateTime.tryParse('${j['decidedAt'] ?? ''}')?.toLocal(),
+    );
+  }
+
+  @override
+  Future<void> requestPayment(String salonId, {required PayMethod method, required int amount, String reference = '', String? proofPath, String note = ''}) async {
+    requireRole({Role.salonOwner});
+    if (!_holaSalon(salonId)) throw DomainError(tr('Payments go through HOLA. Connect to the internet and try again.'));
+    if (!paymentRequestsLive) throw DomainError(tr('Paying from the app opens soon. For now, please pay your sales officer.'));
+    final owed = payableNow(salonId);
+    if (amount <= 0) throw DomainError(tr('Enter the amount you are paying.'), field: 'amount');
+    if (amount > owed) throw DomainError(tr('That is more than you still owe ({amount}).', {'amount': rs(owed)}), field: 'amount');
+    if (method == PayMethod.online && reference.trim().isEmpty) throw DomainError(tr('Enter the transaction ID from your receipt.'), field: 'reference');
+    if (method == PayMethod.online && proofPath == null) throw DomainError(tr('Add a photo of the receipt or transfer screenshot.'));
+    if (method == PayMethod.rider && paymentRequests(salonId).any((r) => r.method == PayMethod.rider && r.open)) {
+      throw DomainError(tr('The rider is already collecting a payment from you. Cancel it first to change it.'));
+    }
+    String? proofId;
+    try {
+      if (proofPath != null) {
+        final bytes = await File(proofPath).readAsBytes();
+        final png = proofPath.toLowerCase().endsWith('.png');
+        proofId = await api!.uploadFile(bytes, contentType: png ? 'image/png' : 'image/jpeg', purpose: 'payment_proof', fileName: 'payment-proof.${png ? 'png' : 'jpg'}');
+      }
+      final res = await api!.post(
+        '/salons/$salonId/credit/payment-requests',
+        {'method': method.api, 'amount': '$amount.00', if (reference.trim().isNotEmpty) 'reference': reference.trim(), 'proofFileId': ?proofId, if (note.trim().isNotEmpty) 'note': note.trim()},
+        headers: {'Idempotency-Key': db.newId() + db.newId()},
+      );
+      final r = res is Map ? _payRequest(res, salonId) : null;
+      if (r != null) _payRequests[salonId] = [r, ...paymentRequests(salonId).where((x) => x.id != r.id)];
+      db.commit();
+    } on ApiError catch (e) {
+      if (e.status == 404) throw DomainError(tr('Paying from the app is not open yet. Please pay your sales officer for now.'));
+      throw apiToDomain(e);
+    }
+  }
+
+  @override
+  Future<void> cancelPaymentRequest(String salonId, String requestId) async {
+    requireRole({Role.salonOwner});
+    try {
+      await api!.post('/salons/$salonId/credit/payment-requests/$requestId/cancel', const {}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
+    await syncPaymentRequests(salonId);
+  }
+
+  /// One LedgerEntryView from HOLA. Its amount is signed (+ owes more,
+  /// − owes less); ADJUSTMENT keeps the sign, the others carry it in [kind].
+  CreditEntry? _creditEntry(Map j, String salonId) {
+    final at = DateTime.tryParse('${j['createdAt'] ?? ''}');
+    if (at == null) return null;
+    final raw = double.tryParse('${j['amount'] ?? 0}') ?? 0;
+    final type = '${j['type'] ?? ''}'.toUpperCase();
+    final kind = switch (type) {
+      'ORDER_CHARGE' || 'CHARGE' => 'CHARGE',
+      'PAYMENT' => 'PAYMENT',
+      'REVERSAL' => 'REVERSAL',
+      _ => 'ADJUSTMENT',
+    };
+    final order = j['order'];
+    final ref = '${j['orderCode'] ?? (order is Map ? order['code'] : null) ?? ''}';
+    final bal = j['balance'];
+    return CreditEntry(
+      id: '${j['id'] ?? '$type-${at.toIso8601String()}'}',
+      salonId: salonId,
+      kind: kind,
+      // Adjustments keep their sign; the other kinds say the direction themselves.
+      amount: kind == 'ADJUSTMENT' ? raw.round() : raw.abs().round(),
+      ref: ref == 'null' ? '' : ref,
+      note: '${j['note'] ?? ''}',
+      at: at.toLocal(),
+      balance: bal == null ? null : money(bal),
+    );
+  }
+
+  bool _onServer(TradeOrder o) => api != null && (db.salons.where((s) => s.id == o.salonId).firstOrNull?.hola ?? false) && o.id.contains('-');
+
+  Future<void> _serverAction(TradeOrder o, String action, [Object? body]) async {
+    try {
+      final res = await api!.post('/orders/${o.id}/$action', body ?? const {}, headers: {'Idempotency-Key': db.newId() + db.newId()}) as J;
+      _mirrorOrder(res, o.salonId, fallback: o.lines, payment: o.payment, by: o.placedById);
+      db.commit();
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
+  }
+
+  /// One server order as the app's [TradeOrder]. Unknown line shapes fall back to [fallback].
+  TradeOrder _mirrorOrder(J j, String salonId, {required List<OrderLine> fallback, required PaymentMethod payment, required String by}) {
+    final raw = (j['items'] ?? j['lines']) as List? ?? const [];
+    final lines = [
+      for (final x in raw.cast<Map>())
+        OrderLine(
+          productId: '${x['productId'] ?? (x['product'] is Map ? (x['product'] as Map)['id'] : '') ?? ''}',
+          variantId: '${x['variantId'] ?? (x['variant'] is Map ? (x['variant'] as Map)['id'] : '') ?? ''}',
+          name: [x['product'] ?? x['name'], x['variant']].where((v) => v is String && v.isNotEmpty).join(' · '),
+          qty: asIntOr(x['qty'] ?? x['quantity']),
+          freeQty: asIntOr(x['freeQty']),
+          unitPrice: money(x['unitPrice'] ?? x['tradePrice']),
+        ),
+    ];
+    final id = '${j['id']}';
+    final old = order(id);
+    final o = TradeOrder(
+      id: id,
+      code: '${j['code'] ?? j['number'] ?? j['orderNo'] ?? ''}',
+      salonId: salonId,
+      placedById: old?.placedById ?? by,
+      lines: lines.isNotEmpty ? lines : (old?.lines ?? fallback),
+      payment: payment,
+      notes: '${j['notes'] ?? ''}',
+      status: '${j['status'] ?? OrderStatus.placed}',
+      history: old?.history ?? [StatusEvent('${j['status'] ?? OrderStatus.placed}', now(), by)],
+      createdAt: DateTime.tryParse('${j['createdAt']}')?.toLocal() ?? now(),
+    );
+    o
+      ..riderId = old?.riderId
+      ..recipientName = old?.recipientName
+      ..cashCollected = old?.cashCollected
+      ..failReason = old?.failReason
+      ..handoverId = old?.handoverId
+      ..signature = old?.signature
+      ..deliveredWhere = old?.deliveredWhere;
+    final coupon = j['coupon'];
+    if (coupon is Map) {
+      o
+        ..couponCode = '${coupon['code'] ?? ''}'
+        ..discount = money(coupon['discount']);
+    } else if (j.containsKey('coupon')) {
+      o
+        ..couponCode = null
+        ..discount = 0;
+    } else {
+      o
+        ..couponCode = old?.couponCode
+        ..discount = old?.discount ?? 0;
+    }
+    _applyDelivery(o, j['delivery']);
+    final at = db.orders.indexWhere((x) => x.id == id);
+    at < 0 ? db.orders.add(o) : db.orders[at] = o;
+    return o;
+  }
+
+  /// HOLA's delivery block on an order: who received it, the cash, why it
+  /// failed, and when each step happened.
+  void _applyDelivery(TradeOrder o, Object? raw) {
+    if (raw is! Map) return;
+    final d = raw;
+    if (d['recipientName'] is String) o.recipientName = d['recipientName'] as String;
+    if (d['cashCollected'] != null) o.cashCollected = money(d['cashCollected']);
+    if (d['failReason'] is String) o.failReason = d['failReason'] as String;
+    DateTime? t(String k) => DateTime.tryParse('${d[k]}')?.toLocal();
+    final steps = [
+      if (t('assignedAt') case final at?) StatusEvent(OrderStatus.dispatched, at, ''),
+      if (t('startedAt') case final at?) StatusEvent(OrderStatus.outForDelivery, at, ''),
+      if (t('deliveredAt') case final at?) StatusEvent(OrderStatus.delivered, at, ''),
+    ];
+    if (steps.isNotEmpty) {
+      o.history
+        ..removeWhere((e) => steps.any((s) => s.status == e.status))
+        ..addAll(steps)
+        ..sort((a, b) => a.at.compareTo(b.at));
+    }
+  }
+
+  // ── rider (HOLA server) ──
+
+  bool get _serverRider => api != null && me?.role == Role.rider;
+  Future<void>? _deliveriesSync;
+
+  @override
+  Future<void> syncDeliveries() => _deliveriesSync ??= _syncDeliveries().whenComplete(() => _deliveriesSync = null);
+
+  Future<void> _syncDeliveries() async {
+    if (!_serverRider) return;
+    final riderId = me!.id;
+    try {
+      final res = await api!.get('/rider/deliveries', query: {'all': 'true'});
+      final list = (res is Map ? (res['data'] as List? ?? const []) : res as List).cast<J>();
+      final seen = <String>{};
+      for (final j in list) {
+        final o = _mirrorDelivery(j);
+        o.riderId = riderId;
+        seen.add(o.id);
+      }
+      // Re-assigned to someone else or withdrawn by the office.
+      db.orders.removeWhere((o) => o.riderId == riderId && o.id.contains('-') && !seen.contains(o.id));
+      db.commit();
+    } catch (e) {
+      debugPrint('Deliveries: sync failed: $e'); // offline: keep the last copy
+    }
+  }
+
+  /// One delivery from GET /rider/deliveries: the order, plus the salon and
+  /// the address it goes to, so the rider can find and call them.
+  TradeOrder _mirrorDelivery(J j) {
+    final salon = (j['salon'] as Map?) ?? const {};
+    final to = (j['deliveryTo'] as Map?) ?? const {};
+    final salonId = '${salon['id'] ?? ''}';
+    var s = db.salons.where((x) => x.id == salonId).firstOrNull;
+    if (s == null) {
+      s = Salon(id: salonId, ownerId: '', name: '${salon['name'] ?? ''}', phone: '', status: SalonStatus.active, palette: salonId.hashCode.abs() % 6, hola: true, createdAt: now());
+      db.salons.add(s);
+    }
+    if (salon['name'] is String) s.name = salon['name'] as String;
+    if (to['phone'] is String && (to['phone'] as String).isNotEmpty) s.phone = to['phone'] as String;
+    // The owner to call (0.10.0); null when HOLA has no owner on file.
+    final owner = salon['owner'];
+    if (owner is Map) {
+      final n = '${owner['fullName'] ?? ''}'.trim(), p = '${owner['phone'] ?? ''}'.trim();
+      s
+        ..ownerName = n.isEmpty ? null : n
+        ..ownerPhone = p.isEmpty ? null : p;
+    } else if (salon.containsKey('owner')) {
+      s
+        ..ownerName = null
+        ..ownerPhone = null;
+    }
+    // The address snapshot from when the order was placed.
+    final b = to['branch'];
+    final branchId = '${b is Map ? b['id'] : to['branchId'] ?? '$salonId~delivery'}';
+    final branchName = '${b is Map ? b['name'] ?? '' : b ?? ''}';
+    var br = db.branches.where((x) => x.id == branchId).firstOrNull;
+    if (br == null) {
+      br = Branch(id: branchId, salonId: salonId, name: branchName, address: '', area: '', city: '');
+      db.branches.add(br);
+    }
+    br
+      ..name = branchName.isEmpty ? br.name : branchName
+      ..address = '${to['addressLine'] ?? br.address}'
+      ..area = '${to['area'] ?? br.area}'
+      ..city = '${to['city'] ?? br.city}'
+      ..location = branchGeo(to) ?? br.location
+      ..mapsUrl = to['mapsUrl'] is String && (to['mapsUrl'] as String).startsWith('https://') ? to['mapsUrl'] as String : br.mapsUrl;
+    final o = _mirrorOrder(j, salonId, fallback: const [], payment: '${j['paymentMethod']}' == 'CREDIT' ? PaymentMethod.credit : PaymentMethod.cod, by: '');
+    // The salon may also pay its credit balance to the rider (contract 0.11.0).
+    final cc = j['creditCollection'];
+    if (cc is Map && cc['requestId'] != null) {
+      _creditCollections[o.id] = CreditCollection(requestId: '${cc['requestId']}', code: '${cc['code'] ?? ''}', amount: money(cc['amount']));
+    } else {
+      _creditCollections.remove(o.id);
+    }
+    return o;
+  }
+
+  @override
+  bool needsDeliveryPhoto(String id) {
+    final o = order(id);
+    return o != null && _onServer(o);
   }
 
   @override
@@ -153,6 +724,10 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   Future<void> cancelOrder(String id, String reason) async {
     final o = _order(id);
     final me = requireMe;
+    if (_onServer(o)) {
+      if (reason.trim().length < 3) throw DomainError(tr('Add the reason for cancelling.'));
+      return _serverAction(o, 'cancel', {'reason': reason.trim()});
+    }
     final s = _salon(o.salonId);
     if (me.role == Role.salonOwner) {
       if (me.salonId != o.salonId) throw DomainError(tr('Not your order.'));
@@ -207,23 +782,59 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> startDelivery(String id) async {
     final o = _riderOrder(id);
+    if (_onServer(o)) return _serverAction(o, 'start-delivery');
     _move(o, OrderStatus.outForDelivery, {OrderStatus.dispatched});
     db.notify(_salon(o.salonId).ownerId, 'On the way', '{code} is out for delivery with {name}.', args: {'code': o.code, 'name': requireMe.name}, icon: 'truck', link: _link(o));
     db.commit();
   }
 
   @override
-  Future<void> deliver(String id, {required String recipientName, required Strokes signature, int? cashCollected}) async {
+  Future<void> deliver(String id, {required String recipientName, required Strokes signature, int? cashCollected, GeoFix? where, String? photoPath}) async {
     final o = _riderOrder(id);
     if (recipientName.trim().length < 2) throw DomainError(tr('Enter who received the order.'));
+    if (_onServer(o)) {
+      if (o.isCod && cashCollected != o.total) throw DomainError(tr('Collect exactly {amount} for this cash order.', {'amount': rs(o.total)}));
+      final f = photoPath == null ? null : File(photoPath);
+      if (f == null || !f.existsSync()) throw DomainError(tr('Take a photo of the delivered order.'));
+      final String photoId;
+      try {
+        photoId = await api!.uploadFile(await f.readAsBytes(), contentType: 'image/jpeg', purpose: 'delivery_proof', fileName: 'delivery-${o.code}.jpg');
+      } catch (e) {
+        throw apiToDomain(e);
+      }
+      // HOLA wants the cash as its own decimal text, equal to the order total
+      // (e.g. "3760.00"), so send the total exactly as the server holds it.
+      var cash = '$cashCollected.00';
+      if (o.isCod) {
+        try {
+          final cur = await api!.get('/orders/${o.id}') as J;
+          if (cur['total'] != null && money(cur['total']) == cashCollected) cash = '${cur['total']}';
+        } catch (_) {}
+      }
+      await _serverAction(o, 'deliver', {'recipientName': recipientName.trim(), 'photoId': photoId, if (o.isCod) 'cashCollected': cash});
+      // Kept on the phone: the signature and where it was handed over.
+      order(id)
+        ?..signature = signature
+        ..deliveredWhere = where;
+      db.commit();
+      return;
+    }
     if (signature.where((s) => s.length > 1).isEmpty) throw DomainError(tr('Ask the recipient to sign.'));
     if (o.isCod && cashCollected != o.total) throw DomainError(tr('Collect exactly {amount} for this cash order.', {'amount': rs(o.total)}));
     _move(o, OrderStatus.delivered, {OrderStatus.outForDelivery});
     o
       ..recipientName = recipientName.trim()
       ..signature = signature
-      ..cashCollected = o.isCod ? cashCollected : null;
-    db.notify(_salon(o.salonId).ownerId, 'Order delivered', '{code} received by {name}. Please confirm the items.', args: {'code': o.code, 'name': o.recipientName ?? ''}, icon: 'check', link: _link(o));
+      ..cashCollected = o.isCod ? cashCollected : null
+      ..deliveredWhere = where;
+    db.notify(
+      _salon(o.salonId).ownerId,
+      'Order delivered',
+      '{code} received by {name}. Please confirm the items.',
+      args: {'code': o.code, 'name': o.recipientName ?? ''},
+      icon: 'check',
+      link: _link(o),
+    );
     db.notifyRole(Role.salesOfficer, 'Delivered', '{salon} · {code}', args: {'salon': _salon(o.salonId).name, 'code': o.code}, icon: 'check', link: _link(o));
     db.commit();
   }
@@ -232,6 +843,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   Future<void> failDelivery(String id, String reason) async {
     final o = _riderOrder(id);
     if (reason.trim().length < 3) throw DomainError(tr('Say why it could not be delivered.'));
+    if (_onServer(o)) return _serverAction(o, 'fail-delivery', {'reason': reason.trim()});
     _move(o, OrderStatus.failed, {OrderStatus.dispatched, OrderStatus.outForDelivery}, note: reason.trim());
     o.failReason = reason.trim();
     final s = _salon(o.salonId);
@@ -245,6 +857,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     requireRole({Role.salonOwner});
     final o = _order(id);
     if (requireMe.salonId != o.salonId) throw DomainError(tr('Not your order.'));
+    if (_onServer(o)) return _serverAction(o, 'confirm-receipt');
     _move(o, OrderStatus.confirmed, {OrderStatus.delivered});
     db.commit();
   }
@@ -253,6 +866,8 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
 
   @override
   CreditSummary credit(String salonId) {
+    final server = _serverCredit[salonId];
+    if (server != null) return server;
     final s = _salon(salonId);
     final entries = statement(salonId).reversed.toList(); // oldest first
     var credits = entries.where((e) => e.kind != 'CHARGE').fold(0, (t, e) => t + e.amount);
@@ -264,12 +879,16 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       outstanding += left;
       if (left > 0 && now().difference(e.at).inDays > s.creditDays) overdue += left;
     }
-    final lastPay = entries.lastWhere((e) => e.kind == 'PAYMENT', orElse: () => CreditEntry(id: '', salonId: '', kind: '', amount: 0, ref: '', at: DateTime(0)));
+    final lastPay = entries.lastWhere(
+      (e) => e.kind == 'PAYMENT',
+      orElse: () => CreditEntry(id: '', salonId: '', kind: '', amount: 0, ref: '', at: DateTime(0)),
+    );
     return CreditSummary(limit: s.creditLimit, outstanding: outstanding, overdue: overdue, days: s.creditDays, lastPayment: lastPay.amount, lastPaymentAt: lastPay.id.isEmpty ? null : lastPay.at);
   }
 
   @override
-  List<CreditEntry> statement(String salonId) => db.credit.where((e) => e.salonId == salonId).toList()..sort((a, b) => b.at.compareTo(a.at));
+  List<CreditEntry> statement(String salonId) => _serverStatement[salonId] ?? db.credit.where((e) => e.salonId == salonId).toList()
+    ..sort((a, b) => b.at.compareTo(a.at));
 
   @override
   Future<void> setCreditTerms(String salonId, {required int limit, required int days}) async {
@@ -299,13 +918,92 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   // ── rider cash ──
 
   @override
-  List<TradeOrder> cashOnHand(String riderId) => db.orders
-      .where((o) => o.riderId == riderId && o.isCod && o.handoverId == null && (o.status == OrderStatus.delivered || o.status == OrderStatus.confirmed))
-      .toList();
+  List<TradeOrder> cashOnHand(String riderId) =>
+      db.orders.where((o) => o.riderId == riderId && o.isCod && o.handoverId == null && (o.status == OrderStatus.delivered || o.status == OrderStatus.confirmed)).toList();
+
+  /// The rider's cash in hand as HOLA counts it (null until fetched).
+  List<CashPayment>? _serverCash;
+
+  @override
+  List<CashPayment> cashHeld(String riderId) => _serverRider && _serverCash != null
+      ? _serverCash!
+      : [for (final o in cashOnHand(riderId)) CashPayment(id: o.id, orderCode: o.code, amount: o.cashCollected ?? 0, receivedAt: o.at(OrderStatus.delivered))];
+
+  @override
+  Future<void> syncCash() async {
+    if (!_serverRider) return;
+    try {
+      final j = await api!.get('/rider/cash') as J;
+      _serverCash = [
+        for (final p in (j['payments'] as List? ?? const []).cast<Map>())
+          CashPayment(
+            id: '${p['id']}',
+            orderCode: '${p['orderCode'] ?? ''}',
+            amount: money(p['amount']),
+            receivedAt: DateTime.tryParse('${p['receivedAt']}')?.toLocal(),
+            creditPayment: '${p['kind']}' == 'CREDIT_PAYMENT',
+            requestCode: '${p['requestCode'] ?? ''}',
+            salonName: switch (p['salon']) {
+              final Map s => '${s['name'] ?? ''}',
+              final String s => s,
+              _ => '',
+            },
+          ),
+      ];
+      db.commit();
+    } catch (e) {
+      debugPrint('Cash: sync failed: $e'); // offline: keep the last copy
+    }
+  }
+
+  /// POST /rider/cash-handovers with every payment the rider holds.
+  Future<CashHandover> _serverHandOver() async {
+    await syncCash();
+    final held = _serverCash ?? const [];
+    if (held.isEmpty) throw DomainError(tr('You have no cash to hand over.'));
+    final J h;
+    try {
+      h =
+          await api!.post(
+                '/rider/cash-handovers',
+                {
+                  'paymentIds': [for (final p in held) p.id],
+                },
+                headers: {'Idempotency-Key': db.newId() + db.newId()},
+              )
+              as J;
+    } on ApiError catch (e) {
+      if (e.code == 'INVALID_REFERENCE' || e.status == 409) {
+        await syncCash();
+        throw DomainError(tr('Your cash changed. Check the amount and try again.'));
+      }
+      throw apiToDomain(e);
+    }
+    final codes = [for (final p in (h['payments'] as List? ?? const []).cast<Map>()) '${p['orderCode'] ?? ''}'];
+    final ho = CashHandover(
+      id: '${h['id']}',
+      riderId: requireMe.id,
+      orderIds: [
+        for (final o in db.orders)
+          if (codes.contains(o.code)) o.id,
+      ],
+      amount: money(h['amount']),
+      at: DateTime.tryParse('${h['createdAt']}')?.toLocal() ?? now(),
+      status: '${h['status'] ?? 'PENDING'}',
+    );
+    for (final o in db.orders.where((o) => codes.contains(o.code))) {
+      o.handoverId = ho.id;
+    }
+    db.handovers.add(ho);
+    _serverCash = [];
+    db.commit();
+    return ho;
+  }
 
   @override
   Future<CashHandover> handOverCash() async {
     requireRole({Role.rider});
+    if (_serverRider) return _serverHandOver();
     final me = requireMe;
     final os = cashOnHand(me.id);
     if (os.isEmpty) throw DomainError(tr('You have no cash to hand over.'));
@@ -314,7 +1012,13 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       o.handoverId = h.id;
     }
     db.handovers.add(h);
-    db.notifyRole(Role.salesOfficer, 'Cash handed over', os.length == 1 ? '{name} · {amount} for {n} delivery. Please confirm.' : '{name} · {amount} for {n} deliveries. Please confirm.', args: {'name': me.name, 'amount': rs(h.amount), 'n': '${os.length}'}, icon: 'cash');
+    db.notifyRole(
+      Role.salesOfficer,
+      'Cash handed over',
+      os.length == 1 ? '{name} · {amount} for {n} delivery. Please confirm.' : '{name} · {amount} for {n} deliveries. Please confirm.',
+      args: {'name': me.name, 'amount': rs(h.amount), 'n': '${os.length}'},
+      icon: 'cash',
+    );
     db.commit();
     return h;
   }
@@ -335,3 +1039,44 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     db.commit();
   }
 }
+
+/// One product from GET /catalog/trade, as the app's [Product].
+Product mirrorProduct(Map j, int i) {
+  final id = '${j['productId'] ?? j['id']}';
+  final name = '${j['product'] ?? j['name'] ?? ''}';
+  final variants = [
+    for (final v in (j['variants'] as List? ?? const []).cast<Map>())
+      Variant(
+        id: '${v['id']}',
+        name: '${v['name'] ?? v['shadeCode'] ?? v['sku'] ?? ''}',
+        tradePrice: money(v['tradePrice']),
+        retailPrice: money(v['retailPrice']),
+        // How many can be ordered; without a count, in stock means orderable.
+        stock: v['available'] is num ? (v['available'] as num).toInt() : (v['inStock'] == false ? 0 : 999),
+      ),
+  ];
+  // The first current scheme: buy N, get M free.
+  var buy = 0, free = 0;
+  final schemes = [for (final v in (j['variants'] as List? ?? const []).cast<Map>()) ...(v['schemes'] as List? ?? const []).cast<Map>(), ...(j['schemes'] as List? ?? const []).cast<Map>()];
+  final bxgy = schemes.where((x) => x['type'] == 'BUY_X_GET_Y').firstOrNull;
+  if (bxgy != null) {
+    buy = asIntOr(bxgy['buyQty']);
+    free = asIntOr(bxgy['freeQty']);
+  }
+  const colours = [0xFF2F80FF, 0xFF7A5BE0, 0xFF169C8F, 0xFFE08A2E, 0xFFD94C7A, 0xFF3D4A66];
+  return Product(
+    id: id,
+    name: name,
+    category: '${j['category'] ?? 'Hair Care'}',
+    description: '${j['description'] ?? ''}',
+    color: colours[id.hashCode.abs() % colours.length],
+    variants: variants,
+    schemeBuy: buy,
+    schemeFree: free,
+    createdAt: DateTime(2026),
+    imageUrl: j['imageUrl'] is String ? j['imageUrl'] as String : '',
+    hola: true,
+  );
+}
+
+int asIntOr(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;

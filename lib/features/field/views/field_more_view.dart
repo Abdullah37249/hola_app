@@ -51,7 +51,9 @@ class _Body extends StatelessWidget {
                 icon: 'grad',
                 tint: 2,
                 title: tr('Training sessions'),
-                sub: upcoming.isEmpty ? tr('Schedule a session for salons') : tr('{sessions} · next {date}', {'sessions': plural(upcoming.length, 'upcoming session'), 'date': dLabel(upcoming.first.at)}),
+                sub: upcoming.isEmpty
+                    ? tr('Schedule a session for salons')
+                    : tr('{sessions} · next {date}', {'sessions': plural(upcoming.length, 'upcoming session'), 'date': dLabel(upcoming.first.at)}),
                 onTap: () => pushPage(context, const TrainingsPage()),
               ),
               MRow(icon: 'chart', title: tr('My performance'), sub: tr('Visits and orders, this week and month'), onTap: () => pushPage(context, const PerformancePage())),

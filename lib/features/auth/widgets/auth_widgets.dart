@@ -26,7 +26,7 @@ class _AuthScaffoldState extends State<AuthScaffold> {
       backgroundColor: c.bg,
       body: Stack(
         children: [
-          Band(role: 'login', height: widget.bandHeight),
+          Band(role: 'login', height: pad.top + kBandBody), // same height as every screen
           NotificationListener<ScrollNotification>(
             onNotification: (n) {
               if (n.depth != 0) return false;
@@ -139,7 +139,7 @@ class PasswordField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => HField(
     label: label ?? tr('Password'),
-    hint: hint,
+    hint: hint ?? tr('Password'), // like the email field's example text
     icon: 'shield',
     controller: controller,
     obscure: obscure,

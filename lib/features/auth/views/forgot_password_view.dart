@@ -41,6 +41,49 @@ class _ResetState extends State<_Reset> {
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<ResetPasswordViewModel>();
+    // HOLA accounts: the server emails a reset link.
+    if (context.read<AuthRepository>().usesServer) {
+      return AuthScaffold(
+        back: true,
+        bandHeight: 330,
+        title: tr('Reset password'),
+        children: [
+          AuthHeading(title: tr('Reset password'), sub: tr('Enter the email on your account and HOLA will email you a link to choose a new password.')),
+          const SizedBox(height: 22),
+          AuthCard(
+            children: [
+              HField(
+                label: tr('Email'),
+                icon: 'mail',
+                hint: tr('you@example.com'),
+                controller: email,
+                keyboard: TextInputType.emailAddress,
+                autofill: const [AutofillHints.email],
+                action: TextInputAction.done,
+                name: 'email',
+                errors: errors,
+              ),
+              HButton(
+                tr('Send reset link'),
+                icon: 'mail',
+                block: true,
+                onTap: () async {
+                  FocusScope.of(context).unfocus();
+                  final nav = Navigator.of(context);
+                  final ok = await attempt(
+                    () => context.read<AuthRepository>().requestPasswordReset(email.text),
+                    success: tr('If an account exists for that email, HOLA has sent a reset link.'),
+                    icon: 'mail',
+                    errors: errors,
+                  );
+                  if (ok) nav.pop();
+                },
+              ),
+            ],
+          ),
+        ],
+      );
+    }
     return AuthScaffold(
       back: true,
       bandHeight: 330,
@@ -90,7 +133,7 @@ class _ResetState extends State<_Reset> {
             HButton(
               tr('Reset password'),
               block: true,
-              
+
               onTap: () async {
                 FocusScope.of(context).unfocus();
                 final nav = Navigator.of(context);

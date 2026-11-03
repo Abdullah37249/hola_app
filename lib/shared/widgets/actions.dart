@@ -46,14 +46,25 @@ Future<bool> confirmSheet(BuildContext context, {required String title, String? 
 }
 
 /// Asks for a short text (reason, note, reply). Returns null if dismissed.
-Future<String?> askText(BuildContext context, {required String title, String? body, required String label, String hint = '', required String confirm, bool danger = false, int minLength = 0, bool multiline = true}) {
+Future<String?> askText(
+  BuildContext context, {
+  required String title,
+  String? body,
+  required String label,
+  String hint = '',
+  required String confirm,
+  bool danger = false,
+  int minLength = 0,
+  bool multiline = true,
+  TextInputType? keyboard,
+}) {
   final ctl = TextEditingController();
   return showHSheet<String>(
     context,
     (ctx) => StatefulBuilder(
       builder: (ctx, set) => VStack(gap: 14, [
         SheetHead(title, sub: body),
-        HField(label: label, hint: hint, controller: ctl, multiline: multiline, onChanged: (_) => set(() {})),
+        HField(label: label, hint: hint, controller: ctl, multiline: multiline, keyboard: keyboard, onChanged: (_) => set(() {})),
         HButton(confirm, block: true, kind: danger ? BtnKind.danger : BtnKind.primary, onTap: ctl.text.trim().length < minLength ? null : () => Navigator.pop(ctx, ctl.text.trim())),
       ]),
     ),

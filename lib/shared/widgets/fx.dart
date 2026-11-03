@@ -7,6 +7,7 @@ import 'package:hola_professional/core/theme/icons.dart';
 import 'package:hola_professional/core/utils/sfx.dart';
 import 'package:hola_professional/core/theme/theme.dart';
 import 'states.dart';
+import 'ui.dart' show InPage;
 
 /// Global effects host: the "dynamic island" toast and brand confetti.
 /// Mounted once above the navigator (see `FxHost`).
@@ -35,6 +36,21 @@ class _ToastData {
 Future<R?> pushPage<R>(BuildContext context, Widget page) {
   Sfx.nav();
   return Navigator.of(context).push<R>(HolaRoute(page));
+}
+
+/// Opens a tab screen (e.g. Team) as its own page, with a back button.
+Future<R?> pushTab<R>(BuildContext context, Widget tab) {
+  Sfx.nav();
+  return Navigator.of(context).push<R>(
+    HolaRoute(
+      Builder(
+        builder: (c) => Scaffold(
+          backgroundColor: c.c.bg,
+          body: InPage(child: tab),
+        ),
+      ),
+    ),
+  );
 }
 
 /// Replace the top page (e.g. booking → booked confirmation).

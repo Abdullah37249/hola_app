@@ -1,4 +1,6 @@
 import 'package:provider/provider.dart';
+
+import '../core/network/api.dart';
 import 'package:provider/single_child_widget.dart';
 
 import '../data/local/local_auth_repository.dart';
@@ -15,15 +17,18 @@ import 'viewmodels/session_view_model.dart';
 
 /// Composition root. The only place that knows repositories are on-device;
 /// swap these for API-backed implementations to connect the HOLA backend.
-List<SingleChildWidget> appProviders({Storage? storage}) {
+///
+/// [api] connects sign-in, customer sign-up and the salon directory to the
+/// HOLA server; without it (widget tests) everything stays on the device.
+List<SingleChildWidget> appProviders({Storage? storage, HolaApi? api}) {
   final db = LocalDatabase(storage ?? FileStorage());
   return [
-    Provider<AuthRepository>.value(value: LocalAuthRepository(db)),
-    Provider<SalonRepository>.value(value: LocalSalonRepository(db)),
-    Provider<BookingRepository>.value(value: LocalBookingRepository(db)),
-    Provider<EngagementRepository>.value(value: LocalEngagementRepository(db)),
-    Provider<TradeRepository>.value(value: LocalTradeRepository(db)),
-    Provider<FieldRepository>.value(value: LocalFieldRepository(db)),
+    Provider<AuthRepository>.value(value: LocalAuthRepository(db, api: api)),
+    Provider<SalonRepository>.value(value: LocalSalonRepository(db, api: api)),
+    Provider<BookingRepository>.value(value: LocalBookingRepository(db, api: api)),
+    Provider<EngagementRepository>.value(value: LocalEngagementRepository(db, api: api)),
+    Provider<TradeRepository>.value(value: LocalTradeRepository(db, api: api)),
+    Provider<FieldRepository>.value(value: LocalFieldRepository(db, api: api)),
     Provider<PreferencesRepository>.value(value: LocalPreferencesRepository(db)),
     ChangeNotifierProvider(create: (c) => SessionViewModel(c.read<AuthRepository>(), c.read<PreferencesRepository>())..init()),
   ];

@@ -8,6 +8,7 @@ import 'ur_field.dart';
 import 'ur_rider.dart';
 import 'ur_salon.dart';
 import 'ur_salon2.dart';
+import 'ur_team.dart';
 import 'ur_trade.dart';
 
 /// App language. English text is the key; Urdu comes from the ur_*.dart maps.
@@ -18,7 +19,7 @@ abstract final class L10n {
   static const supported = [Locale('en'), Locale('ur')];
 
   /// Every Urdu string, merged from the per-area maps.
-  static final Map<String, String> urdu = {...urCommon, ...urAuth, ...urCustomer, ...urSalon, ...urSalon2, ...urField, ...urTrade, ...urRider, ...urData};
+  static final Map<String, String> urdu = {...urCommon, ...urAuth, ...urCustomer, ...urSalon, ...urSalon2, ...urTeam, ...urField, ...urTrade, ...urRider, ...urData};
 }
 
 /// Translates [en] into the current language, then fills `{placeholders}`

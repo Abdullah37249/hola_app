@@ -13,7 +13,7 @@ Future<void> showWalkInSheet(BuildContext context, SalonViewModel vm) async {
     Fx.toast(tr('Add services to your menu first'), icon: 'scissors', tone: 'warn');
     return;
   }
-  final pros = vm.isOwner ? vm.bookable : vm.team.where((p) => p.accountId == vm.me?.id).toList();
+  final pros = vm.bookable;
   if (pros.isEmpty) {
     Fx.toast(tr('Make at least one team member bookable first'), icon: 'users', tone: 'warn');
     return;
@@ -67,24 +67,35 @@ class _WalkInState extends State<_WalkIn> {
       HField(label: tr('Phone (optional)'), hint: '0300 1234567', icon: 'phone', controller: phone, keyboard: TextInputType.phone),
       if (vm.branches.length > 1) ...[
         Text(tr('Branch'), style: T.ttl(context)),
-        ChipRow(children: [for (final b in vm.branches) HChip(b.name, on: b.id == branchId, onTap: () => setState(() => branchId = b.id))]),
+        ChipRow(
+          children: [for (final b in vm.branches) HChip(b.name, on: b.id == branchId, onTap: () => setState(() => branchId = b.id))],
+        ),
       ],
       Text(tr('Services'), style: T.ttl(context)),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final s in svcs)
-          HChip('${s.name} · ${fmtDur(s.durationMin)}', on: picked.contains(s.id), onTap: () => setState(() => picked.contains(s.id) ? picked.remove(s.id) : picked.add(s.id))),
-      ]),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final s in svcs) HChip('${s.name} · ${fmtDur(s.durationMin)}', on: picked.contains(s.id), onTap: () => setState(() => picked.contains(s.id) ? picked.remove(s.id) : picked.add(s.id))),
+        ],
+      ),
       if (widget.pros.length > 1) ...[
         Text(tr('Professional'), style: T.ttl(context)),
-        ChipRow(children: [for (final p in widget.pros) HChip(vm.firstNameOf(p.accountId), on: p.accountId == staffId, onTap: () => setState(() => staffId = p.accountId))]),
+        ChipRow(
+          children: [for (final p in widget.pros) HChip(vm.firstNameOf(p.accountId), on: p.accountId == staffId, onTap: () => setState(() => staffId = p.accountId))],
+        ),
       ],
       Text(tr('Start time'), style: T.ttl(context)),
       if (picked.isEmpty)
         Text(tr('Pick a service to see free times.'), style: T.sm(context).copyWith(color: c.muted))
       else
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final (i, t) in times.indexed) HChip(i == 0 ? tr('Now · {time}', {'time': fmtTime(t)}) : fmtTime(t), on: start == t, onTap: () => setState(() => start = t)),
-        ]),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final (i, t) in times.indexed) HChip(i == 0 ? tr('Now · {time}', {'time': fmtTime(t)}) : fmtTime(t), on: start == t, onTap: () => setState(() => start = t)),
+          ],
+        ),
       if (picked.isNotEmpty) Text('${fmtDur(dur)} · ${rs(price)}', style: T.sm(context).copyWith(color: c.muted)),
       HButton(
         tr('Add to calendar'),

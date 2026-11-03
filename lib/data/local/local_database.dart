@@ -35,6 +35,7 @@ class LocalDatabase extends ChangeNotifier {
   final trainings = <Training>[];
   final reports = <DailyReport>[];
   String? sessionAccountId;
+
   /// Device preferences (theme, sounds), not tied to an account.
   final prefs = <String, Object?>{};
   int _apptSeq = 10000, _orderSeq = 1000;
@@ -98,31 +99,31 @@ class LocalDatabase extends ChangeNotifier {
   // ── serialisation ──
 
   Json _toJson() => {
-        'version': _version,
-        'session': sessionAccountId,
-        'prefs': prefs,
-        'apptSeq': _apptSeq,
-        'orderSeq': _orderSeq,
-        'accounts': [for (final x in accounts) x.toJson()],
-        'staff': [for (final x in staff) x.toJson()],
-        'leave': [for (final x in leave) x.toJson()],
-        'salons': [for (final x in salons) x.toJson()],
-        'branches': [for (final x in branches) x.toJson()],
-        'services': [for (final x in services) x.toJson()],
-        'appointments': [for (final x in appointments) x.toJson()],
-        'reviews': [for (final x in reviews) x.toJson()],
-        'complaints': [for (final x in complaints) x.toJson()],
-        'threads': [for (final x in threads) x.toJson()],
-        'messages': [for (final x in messages) x.toJson()],
-        'notifications': [for (final x in notifications) x.toJson()],
-        'products': [for (final x in products) x.toJson()],
-        'orders': [for (final x in orders) x.toJson()],
-        'credit': [for (final x in credit) x.toJson()],
-        'handovers': [for (final x in handovers) x.toJson()],
-        'visits': [for (final x in visits) x.toJson()],
-        'trainings': [for (final x in trainings) x.toJson()],
-        'reports': [for (final x in reports) x.toJson()],
-      };
+    'version': _version,
+    'session': sessionAccountId,
+    'prefs': prefs,
+    'apptSeq': _apptSeq,
+    'orderSeq': _orderSeq,
+    'accounts': [for (final x in accounts) x.toJson()],
+    'staff': [for (final x in staff) x.toJson()],
+    'leave': [for (final x in leave) x.toJson()],
+    'salons': [for (final x in salons) x.toJson()],
+    'branches': [for (final x in branches) x.toJson()],
+    'services': [for (final x in services) x.toJson()],
+    'appointments': [for (final x in appointments) x.toJson()],
+    'reviews': [for (final x in reviews) x.toJson()],
+    'complaints': [for (final x in complaints) x.toJson()],
+    'threads': [for (final x in threads) x.toJson()],
+    'messages': [for (final x in messages) x.toJson()],
+    'notifications': [for (final x in notifications) x.toJson()],
+    'products': [for (final x in products) x.toJson()],
+    'orders': [for (final x in orders) x.toJson()],
+    'credit': [for (final x in credit) x.toJson()],
+    'handovers': [for (final x in handovers) x.toJson()],
+    'visits': [for (final x in visits) x.toJson()],
+    'trainings': [for (final x in trainings) x.toJson()],
+    'reports': [for (final x in reports) x.toJson()],
+  };
 
   void _fromJson(Json j) {
     List<T> l<T>(String k, T Function(Json) f) => [for (final x in (j[k] as List? ?? const [])) f(x as Json)];

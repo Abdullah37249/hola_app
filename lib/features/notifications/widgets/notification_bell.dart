@@ -12,13 +12,13 @@ class NotificationBell extends StatelessWidget {
   const NotificationBell({super.key, this.onBand = true});
   @override
   Widget build(BuildContext context) => ChangeNotifierProvider(
-        create: (c) => UnreadViewModel(c.read<EngagementRepository>()),
-        child: Consumer<UnreadViewModel>(
-          builder: (context, vm, _) => Semantics(
-            label: vm.count == 0 ? tr('Notifications') : tr('{n} unread notifications', {'n': vm.count}),
-            button: true,
-            child: IconBtn('bell', onBand: onBand, dot: vm.count, onTap: () => pushPage(context, const NotificationsPage())),
-          ),
-        ),
-      );
+    create: (c) => UnreadViewModel(c.read<EngagementRepository>()),
+    child: Consumer<UnreadViewModel>(
+      builder: (context, vm, _) => Semantics(
+        label: vm.count == 0 ? tr('Notifications') : tr('{n} unread notifications', {'n': vm.count}),
+        button: true,
+        child: IconBtn('bell', onBand: onBand, dot: vm.count, onTap: () => pushPage(context, const NotificationsPage())),
+      ),
+    ),
+  );
 }

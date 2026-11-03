@@ -31,8 +31,8 @@ List<Slot> availableSlots({
   final earliest = now.add(Duration(minutes: leadMin));
   final pros = staff.where((s) => s.bookable && (onlyStaffId == null || s.accountId == onlyStaffId)).toList();
 
-  bool busy(String staffId, DateTime s, DateTime e) => appointments.any((a) =>
-      a.id != ignoreAppointmentId && a.staffId == staffId && ApptStatus.holding.contains(a.status) && a.startsAt.isBefore(e) && a.endsAt.isAfter(s));
+  bool busy(String staffId, DateTime s, DateTime e) =>
+      appointments.any((a) => a.id != ignoreAppointmentId && a.staffId == staffId && ApptStatus.holding.contains(a.status) && a.startsAt.isBefore(e) && a.endsAt.isAfter(s));
   bool onLeave(String staffId) => leave.any((l) => l.staffId == staffId && l.status == 'APPROVED' && l.covers(day));
 
   final out = <Slot>[];

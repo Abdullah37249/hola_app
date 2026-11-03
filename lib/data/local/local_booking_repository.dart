@@ -5,9 +5,153 @@ import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
 import '../../domain/services/availability.dart';
 import 'local_auth_repository.dart';
+import 'hola_mirror.dart';
+import 'hola_salon_sync.dart';
+import '../../core/network/api.dart';
+import '../../domain/entities/json.dart' show asInt;
 
 class LocalBookingRepository extends LocalRepository implements BookingRepository {
-  LocalBookingRepository(super.db);
+  LocalBookingRepository(super.db, {this.api});
+
+  /// When set, bookings at HOLA salons go through the HOLA server.
+  final HolaApi? api;
+
+  bool _isHola(String salonId) => api != null && (db.salons.where((s) => s.id == salonId).firstOrNull?.hola ?? false);
+
+  // ── HOLA server ──
+
+  /// Free times loaded from the server, by branch|services|staff|date.
+  final _slots = <String, List<Slot>>{};
+  String _key(String branchId, List<String> serviceIds, String? staffId, DateTime day) => '$branchId|${serviceIds.join(',')}|${staffId ?? ''}|${dateOnly(day).toIso8601String()}';
+  String _ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  @override
+  Future<void> loadAvailability({required String branchId, required List<String> serviceIds, String? staffId, required DateTime from, int days = 14}) async {
+    if (api == null || serviceIds.isEmpty) return;
+    try {
+      final res =
+          await api!.get(
+                '/branches/$branchId/availability',
+                auth: false,
+                query: {'serviceIds': serviceIds.join(','), if (staffId != null) 'staffId': staffId, 'from': _ymd(from), 'days': '${days.clamp(1, 14)}'},
+              )
+              as J;
+      for (var i = 0; i < days; i++) {
+        _slots[_key(branchId, serviceIds, staffId, addDays(from, i))] = const [];
+      }
+      for (final d in (res['days'] as List? ?? const []).cast<J>()) {
+        final day = DateTime.parse(d['date'] as String);
+        _slots[_key(branchId, serviceIds, staffId, day)] = [
+          for (final x in (d['slots'] as List? ?? const []).cast<J>()) Slot(DateTime.parse(x['start'] as String).toLocal(), [for (final id in (x['staffIds'] as List? ?? const [])) '$id']),
+        ];
+      }
+      db.commit(); // let the time picker redraw
+    } on ApiError catch (e) {
+      if (e.code == 'INVALID_REFERENCE' && staffId != null) {
+        throw DomainError(tr('This stylist can’t be booked online right now. Go back and pick another stylist or “Any professional”.'));
+      }
+      throw apiToDomain(e);
+    }
+  }
+
+  /// Runs a server action and copies the booking it returns.
+  Future<Appointment> _remote(Future<dynamic> Function() call, {Map<String, String> codes = const {}}) async {
+    try {
+      final res = await call();
+      final a = mirrorAppointment(db, res as J);
+      db.commit();
+      return a;
+    } on ApiError catch (e) {
+      final msg = codes[e.code];
+      if (msg != null) throw DomainError(msg);
+      throw apiToDomain(e);
+    }
+  }
+
+  static Map<String, String> get _slotCodes => {
+    'APPOINTMENT_SLOT_TAKEN': tr('Someone just took that time. Please pick another.'),
+    'APPOINTMENT_SLOT_UNAVAILABLE': tr('That time can’t be booked any more. Please pick another.'),
+    'VERSION_CONFLICT': tr('This booking changed meanwhile. Please try again.'),
+    'APPOINTMENT_TOO_EARLY': tr('It’s too early for that. Try again a little later.'),
+  };
+
+  Future<void>? _syncing;
+  final _repaired = <String>{};
+
+  /// People whose first sync has run (the first one fills the list quietly).
+  final _synced = <String>{};
+  final _seen = <String, String?>{};
+
+  /// The status this phone last knew for a booking in [j], read before it's replaced.
+  String? _before(J j) => _seen[j['id']] ?? appointment(j['id'] as String)?.status;
+
+  /// Tells the person when the other side changed a booking: the customer
+  /// when the salon confirms, declines, cancels or moves it; the salon when a
+  /// new request or a cancellation arrives.
+  void _announce(Account m, Appointment a, String? before) {
+    _seen[a.id] = a.status;
+    if (!_synced.contains(m.id) || before == a.status) return;
+    final args = {'salon': _salon(a.salonId).name, 'name': a.customerName, ..._whenArgs(a)};
+    final link = NotifLink('appointment', a.id);
+    if (m.role == Role.customer) {
+      switch (a.status) {
+        case ApptStatus.confirmed when before == ApptStatus.requested:
+          db.notify(m.id, 'Booking confirmed', '{salon} · {day} at {time}', args: args, icon: 'check', link: link);
+        case ApptStatus.cancelledBySalon || ApptStatus.declined:
+          db.notify(m.id, "Salon couldn't take your booking", '{salon} · {day} at {time}', args: args, icon: 'x', link: link);
+        case ApptStatus.completed:
+          db.notify(m.id, 'Thanks for visiting {salon}', 'How was it? Rate your visit.', args: args, icon: 'star', link: link);
+      }
+    } else {
+      if (before == null && a.status == ApptStatus.requested) {
+        db.notify(m.id, 'New booking request', '{name} · {day} at {time}', args: args, icon: 'cal', link: link);
+      } else if (before == null && a.status == ApptStatus.confirmed) {
+        db.notify(m.id, 'New booking', '{name} · {day} at {time}', args: args, icon: 'cal', link: link);
+      } else if (a.status == ApptStatus.cancelledByCustomer) {
+        db.notify(m.id, 'Booking cancelled', '{name} cancelled {day} at {time}.', args: args, icon: 'x', link: link);
+      }
+    }
+  }
+
+  @override
+  Future<void> sync() => api == null ? Future.value() : (_syncing ??= _sync().whenComplete(() => _syncing = null));
+
+  Future<void> _sync() async {
+    final m = me;
+    if (m == null) return;
+    try {
+      if (m.role == Role.customer) {
+        for (var page = 1, pages = 1; page <= pages; page++) {
+          final res = await api!.get('/me/appointments', query: {'when': 'all', 'page': '$page', 'pageSize': '100'}) as J;
+          pages = asInt((res['meta'] as Map?)?['totalPages'], 1);
+          for (final j in (res['data'] as List).cast<J>()) {
+            _announce(m, mirrorAppointment(db, j), _before(j));
+          }
+        }
+      } else if (m.role == Role.salonOwner && m.salonId != null && _isHola(m.salonId!)) {
+        // Once per app run: make sure the owner is a bookable stylist with hours
+        // (fixes salons set up before the app saved working hours correctly).
+        if (_repaired.add(m.salonId!)) {
+          try {
+            await HolaSalonSync(db, api!).ensureOwnerBookable(m.salonId!, m.id);
+          } catch (_) {}
+        }
+        // The salon calendar: a month back to two months ahead, page by page.
+        final range = {'from': isoWithOffset(addDays(today, -30)), 'to': isoWithOffset(addDays(today, 60))};
+        for (var page = 1, pages = 1; page <= pages; page++) {
+          final res = await api!.get('/salons/${m.salonId}/appointments', query: {...range, 'page': '$page', 'pageSize': '100'}) as J;
+          pages = asInt((res['meta'] as Map?)?['totalPages'], 1);
+          for (final j in (res['data'] as List).cast<J>()) {
+            _announce(m, mirrorAppointment(db, j), _before(j));
+          }
+        }
+      }
+      _synced.add(m.id);
+      db.commit();
+    } catch (_) {
+      // Offline: keep what we have; the offline banner explains.
+    }
+  }
 
   Salon _salon(String id) => db.salons.where((s) => s.id == id).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
   Appointment _appt(String id) => appointment(id) ?? (throw DomainError(tr('Appointment not found.')));
@@ -19,6 +163,7 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   List<Slot> availability({required String branchId, required List<String> serviceIds, String? staffId, required DateTime day, String? rescheduling}) {
     final b = db.branches.where((x) => x.id == branchId).firstOrNull;
     if (b == null || serviceIds.isEmpty) return const [];
+    if (_isHola(b.salonId)) return _slots[_key(branchId, serviceIds, staffId, day)] ?? const [];
     final dur = _services(serviceIds).fold(0, (s, x) => s + x.durationMin);
     return availableSlots(
       day: day,
@@ -46,7 +191,8 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   List<Appointment> forStaff(String staffId) => db.appointments.where((a) => a.staffId == staffId).toList()..sort((a, b) => a.startsAt.compareTo(b.startsAt));
 
   @override
-  bool canCancelFree(Appointment a) => a.startsAt.difference(now()).inMinutes >= _salon(a.salonId).cancelWindowHours * 60;
+  bool canCancelFree(Appointment a) => a.hola ? (a.freeCancelUntil == null || now().isBefore(a.freeCancelUntil!)) : _canCancelFreeHere(a);
+  bool _canCancelFreeHere(Appointment a) => a.startsAt.difference(now()).inMinutes >= _salon(a.salonId).cancelWindowHours * 60;
 
   @override
   bool canMarkNoShow(Appointment a) => a.status == ApptStatus.confirmed && now().isAfter(a.startsAt.add(Duration(minutes: _salon(a.salonId).noShowGraceMin)));
@@ -65,6 +211,17 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   @override
   Future<Appointment> book({required String salonId, required String branchId, required List<String> serviceIds, String? staffId, required DateTime start, String notes = ''}) async {
     requireRole({Role.customer});
+    if (_isHola(salonId)) {
+      final key = DateTime.now().microsecondsSinceEpoch.toRadixString(36) + db.newId(); // one booking even if the request is retried
+      return _remote(
+        () => api!.post(
+          '/appointments',
+          {'branchId': branchId, 'serviceIds': serviceIds, 'staffId': ?staffId, 'startsAt': start.toUtc().toIso8601String(), if (notes.trim().isNotEmpty) 'notes': notes.trim()},
+          headers: {'Idempotency-Key': key},
+        ),
+        codes: _slotCodes,
+      );
+    }
     final me = requireMe;
     final s = _salon(salonId);
     if (!s.isListed) throw DomainError(tr('This salon is not taking bookings right now.'));
@@ -97,14 +254,30 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
       db.notify(me.id, 'Booking confirmed', '{salon} · {day} at {time}', args: {'salon': s.name, ..._whenArgs(a)}, icon: 'check', link: link);
       db.notifySalon(salonId, 'New booking', '{name} · {services} · {day} at {time}', args: {'name': me.name, 'services': what, ..._whenArgs(a)}, icon: 'cal', link: link, onlyStaffId: a.staffId);
     } else {
-      db.notifySalon(salonId, 'New booking request', '{name} · {services} · {day} at {time}. Please confirm.', args: {'name': me.name, 'services': what, ..._whenArgs(a)}, icon: 'cal', link: link, onlyStaffId: a.staffId);
+      db.notifySalon(
+        salonId,
+        'New booking request',
+        '{name} · {services} · {day} at {time}. Please confirm.',
+        args: {'name': me.name, 'services': what, ..._whenArgs(a)},
+        icon: 'cal',
+        link: link,
+        onlyStaffId: a.staffId,
+      );
     }
     db.commit();
     return a;
   }
 
   @override
-  Future<Appointment> walkIn({required String salonId, required String branchId, required String guestName, required String guestPhone, required List<String> serviceIds, required String staffId, required DateTime start}) async {
+  Future<Appointment> walkIn({
+    required String salonId,
+    required String branchId,
+    required String guestName,
+    required String guestPhone,
+    required List<String> serviceIds,
+    required String staffId,
+    required DateTime start,
+  }) async {
     requireRole({Role.salonOwner, Role.salonStaff});
     if (requireMe.salonId != salonId) throw DomainError(tr('Not your salon.'));
     if (guestName.trim().length < 2) throw DomainError(tr("Enter the client's name."));
@@ -133,7 +306,16 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
       createdAt: now(),
     );
     db.appointments.add(a);
-    if (staffId != requireMe.id) db.notify(staffId, 'Walk-in added', '{name} · {services} · {day} at {time}', args: {'name': a.customerName, 'services': a.serviceNames.join(', '), ..._whenArgs(a)}, icon: 'cal', link: NotifLink('appointment', a.id));
+    if (staffId != requireMe.id) {
+      db.notify(
+        staffId,
+        'Walk-in added',
+        '{name} · {services} · {day} at {time}',
+        args: {'name': a.customerName, 'services': a.serviceNames.join(', '), ..._whenArgs(a)},
+        icon: 'cal',
+        link: NotifLink('appointment', a.id),
+      );
+    }
     db.commit();
     return a;
   }
@@ -159,6 +341,10 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
 
   @override
   Future<void> confirm(String id) async {
+    if (appointment(id)?.hola == true && api != null) {
+      await _remote(() => api!.post('/appointments/$id/confirm', const {}));
+      return;
+    }
     final a = _forSalon(id);
     _move(a, ApptStatus.confirmed, from: {ApptStatus.requested});
     _tellCustomer(a, 'Booking confirmed', '{salon} · {day} at {time}', 'check', {'salon': _salon(a.salonId).name, ..._whenArgs(a)});
@@ -167,25 +353,50 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
 
   @override
   Future<void> decline(String id, String reason) async {
+    if (appointment(id)?.hola == true && api != null) {
+      if (reason.trim().isEmpty) throw DomainError(tr('Add a short reason for the client.'));
+      await _remote(() => api!.post('/appointments/$id/decline', {'reason': reason.trim()}));
+      return;
+    }
     final a = _forSalon(id);
     _move(a, ApptStatus.declined, note: reason.trim(), from: {ApptStatus.requested});
-    _tellCustomer(a, "Salon couldn't take your booking", reason.trim().isEmpty ? '{salon} · {day} at {time}' : '{salon} · {day} at {time}. {reason}', 'x', {'salon': _salon(a.salonId).name, ..._whenArgs(a), 'reason': reason.trim()});
+    _tellCustomer(a, "Salon couldn't take your booking", reason.trim().isEmpty ? '{salon} · {day} at {time}' : '{salon} · {day} at {time}. {reason}', 'x', {
+      'salon': _salon(a.salonId).name,
+      ..._whenArgs(a),
+      'reason': reason.trim(),
+    });
     db.commit();
   }
 
   @override
   Future<void> cancel(String id, String reason) async {
     final a = _appt(id);
+    if (a.hola && api != null) {
+      await _remote(() => api!.post('/appointments/$id/cancel', {if (reason.trim().isNotEmpty) 'reason': reason.trim()}));
+      return;
+    }
     final me = requireMe;
     if (me.role == Role.customer) {
       if (a.customerId != me.id) throw DomainError(tr('Not your booking.'));
       a.lateCancel = a.status == ApptStatus.confirmed && !canCancelFree(a);
       _move(a, ApptStatus.cancelledByCustomer, note: reason.trim(), from: ApptStatus.upcoming);
-      db.notifySalon(a.salonId, 'Booking cancelled', a.lateCancel ? '{name} cancelled {day} at {time} (late).' : '{name} cancelled {day} at {time}.', args: {'name': a.customerName, ..._whenArgs(a)}, icon: 'x', link: NotifLink('appointment', a.id), onlyStaffId: a.staffId);
+      db.notifySalon(
+        a.salonId,
+        'Booking cancelled',
+        a.lateCancel ? '{name} cancelled {day} at {time} (late).' : '{name} cancelled {day} at {time}.',
+        args: {'name': a.customerName, ..._whenArgs(a)},
+        icon: 'x',
+        link: NotifLink('appointment', a.id),
+        onlyStaffId: a.staffId,
+      );
     } else {
       _forSalon(id);
       _move(a, ApptStatus.cancelledBySalon, note: reason.trim(), from: ApptStatus.upcoming);
-      _tellCustomer(a, 'Booking cancelled by salon', reason.trim().isEmpty ? '{salon} · {day} at {time}' : '{salon} · {day} at {time}. {reason}', 'x', {'salon': _salon(a.salonId).name, ..._whenArgs(a), 'reason': reason.trim()});
+      _tellCustomer(a, 'Booking cancelled by salon', reason.trim().isEmpty ? '{salon} · {day} at {time}' : '{salon} · {day} at {time}. {reason}', 'x', {
+        'salon': _salon(a.salonId).name,
+        ..._whenArgs(a),
+        'reason': reason.trim(),
+      });
     }
     db.commit();
   }
@@ -193,6 +404,10 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   @override
   Future<void> reschedule(String id, DateTime start, {String? staffId}) async {
     final a = _appt(id);
+    if (a.hola && api != null) {
+      await _remote(() => api!.post('/appointments/$id/reschedule', {'startsAt': start.toUtc().toIso8601String(), 'staffId': ?staffId, 'version': a.version}), codes: _slotCodes);
+      return;
+    }
     final me = requireMe;
     final isCustomer = me.role == Role.customer;
     if (isCustomer ? a.customerId != me.id : me.salonId != a.salonId) throw DomainError(tr('Not your booking.'));
@@ -206,7 +421,15 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     if (isCustomer && !s.autoConfirm) a.status = ApptStatus.requested;
     a.history.add(StatusEvent('RESCHEDULED', now(), me.id, 'From $before'));
     if (isCustomer) {
-      db.notifySalon(a.salonId, 'Booking moved', '{name} moved {fromDay} at {fromTime} to {day} at {time}.', args: {'name': a.customerName, 'fromDay': beforeArgs['day']!, 'fromTime': beforeArgs['time']!, ..._whenArgs(a)}, icon: 'cal', link: NotifLink('appointment', a.id), onlyStaffId: a.staffId);
+      db.notifySalon(
+        a.salonId,
+        'Booking moved',
+        '{name} moved {fromDay} at {fromTime} to {day} at {time}.',
+        args: {'name': a.customerName, 'fromDay': beforeArgs['day']!, 'fromTime': beforeArgs['time']!, ..._whenArgs(a)},
+        icon: 'cal',
+        link: NotifLink('appointment', a.id),
+        onlyStaffId: a.staffId,
+      );
     } else {
       _tellCustomer(a, 'Your booking was moved', '{salon} moved it to {day} at {time}.', 'cal', {'salon': s.name, ..._whenArgs(a)});
     }
@@ -215,6 +438,10 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
 
   @override
   Future<void> checkIn(String id) async {
+    if (appointment(id)?.hola == true && api != null) {
+      await _remote(() => api!.post('/appointments/$id/check-in', const {}), codes: _slotCodes);
+      return;
+    }
     final a = _forSalon(id);
     if (a.startsAt.difference(now()).inHours >= 2) throw DomainError(tr('Check-in opens 2 hours before the appointment.'));
     _move(a, ApptStatus.checkedIn, from: {ApptStatus.confirmed});
@@ -223,6 +450,10 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
 
   @override
   Future<void> startService(String id) async {
+    if (appointment(id)?.hola == true && api != null) {
+      await _remote(() => api!.post('/appointments/$id/start', const {}));
+      return;
+    }
     final a = _forSalon(id);
     _move(a, ApptStatus.inService, from: {ApptStatus.checkedIn, ApptStatus.confirmed});
     db.commit();
@@ -230,6 +461,10 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
 
   @override
   Future<void> complete(String id) async {
+    if (appointment(id)?.hola == true && api != null) {
+      await _remote(() => api!.post('/appointments/$id/complete', const {}));
+      return;
+    }
     final a = _forSalon(id);
     _move(a, ApptStatus.completed, from: {ApptStatus.inService, ApptStatus.checkedIn});
     _tellCustomer(a, 'How was your visit?', 'Rate {salon} and help others choose.', 'star', {'salon': _salon(a.salonId).name});
@@ -238,6 +473,10 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
 
   @override
   Future<void> noShow(String id) async {
+    if (appointment(id)?.hola == true && api != null) {
+      await _remote(() => api!.post('/appointments/$id/no-show', const {}), codes: _slotCodes);
+      return;
+    }
     final a = _forSalon(id);
     if (!canMarkNoShow(a)) throw DomainError(tr('You can mark a no-show {n} minutes after the start time.', {'n': _salon(a.salonId).noShowGraceMin}));
     _move(a, ApptStatus.noShow, from: {ApptStatus.confirmed});

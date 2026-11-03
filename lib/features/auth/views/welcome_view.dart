@@ -20,8 +20,17 @@ class WelcomeView extends StatelessWidget {
   Widget build(BuildContext context) => ChangeNotifierProvider(create: (c) => SignInViewModel(c.read<AuthRepository>()), child: const _SignIn());
 }
 
+/// Sign-in for HOLA delivery riders, with the account HOLA created for them.
+/// (Riders don't sign up in the app; HOLA registers them on its server.)
+class RiderSignInView extends StatelessWidget {
+  const RiderSignInView({super.key});
+  @override
+  Widget build(BuildContext context) => ChangeNotifierProvider(create: (c) => SignInViewModel(c.read<AuthRepository>()), child: const _SignIn(rider: true));
+}
+
 class _SignIn extends StatefulWidget {
-  const _SignIn();
+  const _SignIn({this.rider = false});
+  final bool rider;
   @override
   State<_SignIn> createState() => _SignInState();
 }
@@ -41,8 +50,10 @@ class _SignInState extends State<_SignIn> {
   Future<void> _submit(SignInViewModel vm) async {
     FocusScope.of(context).unfocus();
     String? name;
+    final nav = Navigator.of(context);
     final ok = await attempt(() async => name = (await vm.signIn(email.text, pass.text)).firstName, errors: errors);
     if (ok) TextInput.finishAutofillContext(); // offer to save the password
+    if (ok && widget.rider) nav.popUntil((r) => r.isFirst);
     if (ok) {
       Sfx.success();
       Fx.toast(tr('Welcome back, {name}', {'name': name}));
@@ -54,8 +65,16 @@ class _SignInState extends State<_SignIn> {
     final vm = context.watch<SignInViewModel>();
     final c = context.c;
     return AuthScaffold(
+      back: widget.rider,
       children: [
-        AuthHeading(top: Logo(height: 36, white: true), title: tr('Welcome back'), sub: tr('Salons, bookings and HOLA professional, in one place.')),
+        if (widget.rider)
+          AuthHeading(eyebrow: tr('HOLA delivery'), title: tr('Rider sign in'), sub: tr('Use the email and password HOLA gave you. Your assigned orders open straight away.'))
+        else
+          AuthHeading(
+            top: const Center(child: Logo(height: 54, white: true)),
+            title: tr('Welcome back'),
+            sub: tr('Salons, bookings and HOLA professional, in one place.'),
+          ),
         const SizedBox(height: 28),
         AutofillGroup(
           child: AuthCard(
@@ -95,21 +114,50 @@ class _SignInState extends State<_SignIn> {
             ],
           ),
         ),
-        const SizedBox(height: 24),
-        Row(
-          children: [
-            Expanded(child: Divider(color: c.line)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(tr('New to HOLA?'), style: T.sub(context)),
+        if (!widget.rider) ...[
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(child: Divider(color: c.line)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(tr('New to HOLA?'), style: T.sub(context)),
+              ),
+              Expanded(child: Divider(color: c.line)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          HButton(tr('Create an account'), icon: 'sparkle', kind: BtnKind.secondary, block: true, onTap: () => pushPage(context, const SignUpView())),
+          const SizedBox(height: 12),
+          Text(tr('Sign up as a customer or a salon. HOLA officers and riders sign in with the account HOLA gave them.'), textAlign: TextAlign.center, style: T.cap(context)),
+          const SizedBox(height: 20),
+          // HOLA's delivery riders have their own way in.
+          HCard(
+            onTap: () => pushPage(context, const RiderSignInView()),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(color: c.brandSoft, borderRadius: BorderRadius.circular(14)),
+                  alignment: Alignment.center,
+                  child: HIcon('truck', size: 22, color: c.brand),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tr('Delivery rider?'), style: T.ttl(context)),
+                      Text(tr('Sign in to see the orders assigned to you'), style: T.cap(context)),
+                    ],
+                  ),
+                ),
+                HIcon('chev', size: 18, color: c.muted),
+              ],
             ),
-            Expanded(child: Divider(color: c.line)),
-          ],
-        ),
-        const SizedBox(height: 16),
-        HButton(tr('Create an account'), icon: 'sparkle', kind: BtnKind.secondary, block: true, onTap: () => pushPage(context, const SignUpView())),
-        const SizedBox(height: 12),
-        Text(tr('For customers, salon owners and the HOLA team.\nSalon staff sign in with the details their owner set up.'), textAlign: TextAlign.center, style: T.cap(context)),
+          ),
+        ],
       ],
     );
   }

@@ -48,7 +48,11 @@ class LegalPage extends StatelessWidget {
           // English text keeps left-to-right layout inside the Urdu app, so punctuation stays put.
           Text('${i + 1}. $heading', textDirection: TextDirection.ltr, style: T.h3(context)),
           const SizedBox(height: 6),
-          Text(body, textDirection: TextDirection.ltr, style: T.body(context).copyWith(color: c.body, height: 1.5)),
+          Text(
+            body,
+            textDirection: TextDirection.ltr,
+            style: T.body(context).copyWith(color: c.body, height: 1.5),
+          ),
           const SizedBox(height: 20),
         ],
       ],

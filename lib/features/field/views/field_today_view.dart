@@ -74,7 +74,9 @@ class _Body extends StatelessWidget {
         (
           'cash',
           tr('Confirm cash'),
-          vm.handoversToConfirm.length == 1 ? tr('{amount} from {name}', {'amount': rs(vm.handoversToConfirm.first.amount), 'name': vm.personName(vm.handoversToConfirm.first.riderId)}) : tr('Riders handed over cash'),
+          vm.handoversToConfirm.length == 1
+              ? tr('{amount} from {name}', {'amount': rs(vm.handoversToConfirm.first.amount), 'name': vm.personName(vm.handoversToConfirm.first.riderId)})
+              : tr('Riders handed over cash'),
           vm.handoversToConfirm.length,
           () => session.setTab('orders'),
         ),

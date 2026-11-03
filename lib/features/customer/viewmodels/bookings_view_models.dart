@@ -6,7 +6,9 @@ import 'customer_lookups.dart';
 
 /// Bookings tab: upcoming and past appointments of the signed-in customer.
 class BookingsViewModel extends RepoViewModel with CustomerLookups {
-  BookingsViewModel(this.salons, this.auth, this.bookings) : super(bookings);
+  BookingsViewModel(this.salons, this.auth, this.bookings) : super(bookings) {
+    bookings.sync();
+  }
   @override
   final SalonRepository salons;
   @override
@@ -29,7 +31,9 @@ class BookingsViewModel extends RepoViewModel with CustomerLookups {
 
 /// One booking: actions the customer can take and its review/complaint.
 class BookingDetailViewModel extends RepoViewModel with CustomerLookups {
-  BookingDetailViewModel(this.salons, this.auth, this.bookings, this.engage, this.id) : super(bookings);
+  BookingDetailViewModel(this.salons, this.auth, this.bookings, this.engage, this.id) : super(bookings) {
+    bookings.sync(); // the latest status from HOLA
+  }
   @override
   final SalonRepository salons;
   @override
@@ -45,6 +49,9 @@ class BookingDetailViewModel extends RepoViewModel with CustomerLookups {
   List<Complaint> get complaints => me == null ? const [] : engage.complaintsForCustomer(me!.id).where((c) => c.appointmentId == id).toList();
 
   bool get isUpcoming => a != null && ApptStatus.upcoming.contains(a!.status) && a!.startsAt.isAfter(now());
+
+  /// In-app chat for HOLA-server bookings isn't on the server yet.
+  bool get onServer => a?.hola ?? false;
   bool get canReview => a?.status == ApptStatus.completed && review == null;
   bool get freeCancel => a != null && (a!.status == ApptStatus.requested || bookings.canCancelFree(a!));
 
@@ -81,36 +88,3 @@ class FeedbackViewModel extends RepoViewModel with CustomerLookups {
 
 /// Topics a customer can raise feedback about. Fixed vocabulary.
 const feedbackTopics = ['Service quality', 'Waiting time', 'Staff behaviour', 'Price or billing', 'Hygiene', 'Booking problem', 'Compliment', 'Other'];
-
-/// Products tab: HOLA catalogue (retail prices) and salons to ask about it.
-class ShopViewModel extends RepoViewModel with CustomerLookups {
-  ShopViewModel(this.salons, this.auth, this.bookings, this.trade) : super(trade);
-  @override
-  final SalonRepository salons;
-  @override
-  final AuthRepository auth;
-  final BookingRepository bookings;
-  final TradeRepository trade;
-
-  String? category;
-
-  List<Product> get _retail => trade.products().where((p) => p.variants.any((v) => v.retailPrice > 0)).toList();
-  List<String> get categories => [for (final c in productCategories) if (_retail.any((p) => p.category == c)) c];
-  List<Product> get items => _retail.where((p) => category == null || p.category == category).toList();
-
-  int retailFrom(Product p) => p.variants.where((v) => v.retailPrice > 0).map((v) => v.retailPrice).reduce((a, b) => a < b ? a : b);
-
-  List<Salon> get bookedSalons {
-    if (me == null) return const [];
-    final ids = <String>[];
-    for (final a in bookings.forCustomer(me!.id).reversed) {
-      if (!ids.contains(a.salonId)) ids.add(a.salonId);
-    }
-    return [for (final i in ids) ?salons.salon(i)];
-  }
-
-  void setCategory(String? c) {
-    category = c;
-    notify();
-  }
-}

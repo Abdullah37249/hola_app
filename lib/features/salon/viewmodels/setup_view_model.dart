@@ -1,5 +1,6 @@
 import '../../../core/l10n/l10n.dart';
 import '../../../core/mvvm/view_model.dart';
+import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 
 /// First-run salon set-up wizard: about → location → review → create.
@@ -13,30 +14,39 @@ class SetupViewModel extends ViewModel {
 
   String name = '', phone = '', about = '';
   String branchName = '', address = '', area = '', city = '';
+  GeoFix? location; // GPS at the salon's door, optional
+
+  void setLocation(GeoFix v) {
+    location = v;
+    notify();
+  }
 
   String get ownerName => _auth.current?.firstName ?? '';
   String get ownerPhone => _auth.current?.phone ?? '';
   String get ownerCity => _auth.current?.city ?? '';
+
   /// Palette the new salon will get (matches the repository's choice).
   int get salonCount => _salons.allSalons().length;
 
   /// What is missing on the current step (null = can continue).
   /// What still blocks this step, tied to its field so the form can show it there.
   DomainError? get missing => switch (step) {
-        0 => name.trim().length < 2
-            ? DomainError(tr('Enter your salon name.'), field: 'name')
-            : phone.replaceAll(RegExp(r'[^0-9]'), '').length < 10
-                ? DomainError(tr('Enter the salon phone number.'), field: 'phone')
-                : null,
-        1 => address.trim().length < 2
-            ? DomainError(tr('Enter the street address.'), field: 'address')
-            : area.trim().length < 2
-                ? DomainError(tr('Enter the area.'), field: 'area')
-                : city.trim().length < 2
-                    ? DomainError(tr('Enter the city.'), field: 'city')
-                    : null,
-        _ => null,
-      };
+    0 =>
+      name.trim().length < 2
+          ? DomainError(tr('Enter your salon name.'), field: 'name')
+          : phone.replaceAll(RegExp(r'[^0-9]'), '').length < 10
+          ? DomainError(tr('Enter the salon phone number.'), field: 'phone')
+          : null,
+    1 =>
+      address.trim().length < 2
+          ? DomainError(tr('Enter the street address.'), field: 'address')
+          : area.trim().length < 2
+          ? DomainError(tr('Enter the area.'), field: 'area')
+          : city.trim().length < 2
+          ? DomainError(tr('Enter the city.'), field: 'city')
+          : null,
+    _ => null,
+  };
 
   void next() {
     if (step < steps.length - 1) step++;
@@ -53,7 +63,12 @@ class SetupViewModel extends ViewModel {
     notify();
   }
 
-  Future<void> create() => _salons.createSalon(name: name, phone: phone, about: about, branchName: branchName, address: address, area: area, city: city);
+  Future<void> create() async {
+    final s = await _salons.createSalon(name: name, phone: phone, about: about, branchName: branchName, address: address, area: area, city: city);
+    final at = location;
+    final b = _salons.branches(s.id).firstOrNull;
+    if (at != null && b != null) await _salons.setBranchLocation(b.id, at);
+  }
 
   Future<void> signOut() => _auth.signOut();
 }

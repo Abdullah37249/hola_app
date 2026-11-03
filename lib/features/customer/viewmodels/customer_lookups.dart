@@ -24,9 +24,9 @@ mixin CustomerLookups {
 
   /// Bookable professionals with their account names.
   List<(StaffProfile, String)> team(String salonId) => [
-        for (final p in salons.staff(salonId))
-          if (p.bookable) (p, personName(p.accountId)),
-      ];
+    for (final p in salons.staff(salonId))
+      if (p.bookable) (p, personName(p.accountId)),
+  ];
 }
 
 /// Open/closed wording for a branch right now.
@@ -39,7 +39,9 @@ mixin CustomerLookups {
   for (var i = 1; i <= 7; i++) {
     final d = addDays(t, i);
     final n = b.hoursOn(d);
-    if (n != null) return (open: false, label: i == 1 ? tr('Closed · opens tomorrow {time}', {'time': _hm(n.start)}) : tr('Closed · opens {day} {time}', {'day': tr(_wd[d.weekday - 1]), 'time': _hm(n.start)}));
+    if (n != null) {
+      return (open: false, label: i == 1 ? tr('Closed · opens tomorrow {time}', {'time': _hm(n.start)}) : tr('Closed · opens {day} {time}', {'day': tr(_wd[d.weekday - 1]), 'time': _hm(n.start)}));
+    }
   }
   return (open: false, label: tr('Closed'));
 }

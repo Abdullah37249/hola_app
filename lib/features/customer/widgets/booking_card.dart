@@ -27,31 +27,54 @@ class BookingCard extends StatelessWidget {
     return HCard(
       onTap: () => pushPage(context, BookingDetailPage(id: a.id)),
       child: VStack([
-        Row(children: [
-          Expanded(child: Text('${dayLabel(a.startsAt, today)} · ${fmtTime(a.startsAt)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sm(context).copyWith(color: c.muted, fontWeight: FontWeight.w600))),
-          const SizedBox(width: 8),
-          CustomerStatus(a.status),
-        ]),
-        Row(children: [
-          artThumb(s?.palette ?? 0, photo: s?.cover, 52, radius: 10, name: s?.name),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(s?.name ?? tr('Salon'), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
-              Text(a.serviceNames.join(', '), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sm(context).copyWith(color: c.muted)),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          Text(rs(a.price), style: T.ttl(context)),
-        ]),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${dayLabel(a.startsAt, today)} · ${fmtTime(a.startsAt)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: T.sm(context).copyWith(color: c.muted, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 8),
+            CustomerStatus(a.status),
+          ],
+        ),
+        Row(
+          children: [
+            artThumb(s?.palette ?? 0, photo: s?.cover, 52, radius: 10, name: s?.name),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s?.name ?? tr('Salon'), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
+                  Text(
+                    a.serviceNames.join(', '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: T.sm(context).copyWith(color: c.muted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(rs(a.price), style: T.ttl(context)),
+          ],
+        ),
         if (a.status == ApptStatus.completed && !a.reviewed) ...[
           const HDivider(),
-          Row(children: [
-            Expanded(child: Text(tr('How was your visit?'), style: T.sm(context).copyWith(color: c.muted))),
-            Text(tr('Rate it'), style: T.link(context)),
-            const SizedBox(width: 2),
-            HIcon('chev', size: 16, color: c.brandText),
-          ]),
+          Row(
+            children: [
+              Expanded(
+                child: Text(tr('How was your visit?'), style: T.sm(context).copyWith(color: c.muted)),
+              ),
+              Text(tr('Rate it'), style: T.link(context)),
+              const SizedBox(width: 2),
+              HIcon('chev', size: 16, color: c.brandText),
+            ],
+          ),
         ],
       ]),
     );

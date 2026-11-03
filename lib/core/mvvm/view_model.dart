@@ -25,8 +25,13 @@ abstract class ViewModel extends ChangeNotifier {
   }
 
   @protected
-  void notify() { if (!_disposed) notifyListeners(); }
+  void notify() {
+    if (!_disposed) notifyListeners();
+  }
 
   @override
-  void dispose() { _disposed = true; super.dispose(); }
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 }

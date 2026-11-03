@@ -59,45 +59,58 @@ class _ExploreBodyState extends State<_ExploreBody> {
     final cities = vm.cities;
     return BandView(
       role: 'customer',
-      bandHeight: 330,
+      onRefresh: vm.syncSalons,
       children: [
-        ...staggered([
-          TopHead(title: tr('Explore'), sub: tr('Find and book salons near you'), actions: const []),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _q,
-            focusNode: _focus,
-            onChanged: vm.setQuery,
-            textInputAction: TextInputAction.search,
-            style: TextStyle(fontFamily: T.f, fontSize: 16, color: c.ink),
-            decoration: InputDecoration(
-              hintText: tr('Salon, service or area'),
-              hintStyle: TextStyle(color: c.subtle),
-              filled: true,
-              fillColor: c.surface,
-              prefixIcon: Padding(
-                padding: const EdgeInsets.only(left: 14, right: 10),
-                child: HIcon('search', size: 20, color: c.muted),
-              ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 0),
-              suffixIcon: vm.query.isEmpty
-                  ? null
-                  : IconButton(
-                      onPressed: () {
-                        _q.clear();
-                        vm.setQuery('');
-                      },
-                      icon: HIcon('x', size: 18, color: c.muted),
-                    ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: c.brand, width: 1.5),
+        ...staggered([TopHead(title: tr('Explore'), sub: tr('Find and book salons near you'), actions: const []), const SizedBox(height: 14)]),
+        // Search across the header's edge, like every other screen.
+        BandMark(
+          match: true,
+          child: Reveal(
+            i: 1,
+            child: TextField(
+              controller: _q,
+              focusNode: _focus,
+              onChanged: vm.setQuery,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(fontFamily: T.f, fontSize: 16, color: c.ink),
+              decoration: InputDecoration(
+                hintText: tr('Salon, service or area'),
+                hintStyle: TextStyle(color: c.subtle),
+                filled: true,
+                fillColor: c.surface,
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.only(left: 14, right: 10),
+                  child: HIcon('search', size: 20, color: c.muted),
+                ),
+                prefixIconConstraints: const BoxConstraints(minWidth: 0),
+                suffixIcon: vm.query.isEmpty
+                    ? null
+                    : IconButton(
+                        onPressed: () {
+                          _q.clear();
+                          vm.setQuery('');
+                        },
+                        icon: HIcon('x', size: 18, color: c.muted),
+                      ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: c.line),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: c.line),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: c.brand, width: 1.5),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 12),
+        ),
+        ...staggered([
+          const SizedBox(height: 14),
           ChipRow(
             children: [
               if (cities.length > 1)
@@ -105,9 +118,8 @@ class _ExploreBodyState extends State<_ExploreBody> {
               for (final cat in serviceCategories) HChip(tr(cat), on: vm.category == cat, onTap: () => vm.setCategory(cat)),
             ],
           ),
-        ]),
-        const BandMark(),
-        const SizedBox(height: 24),
+        ], 2),
+        const SizedBox(height: 20),
         if (list.isEmpty)
           Reveal(
             i: 4,
@@ -135,7 +147,10 @@ class _ExploreBodyState extends State<_ExploreBody> {
             i: 4,
             child: Padding(
               padding: const EdgeInsets.only(bottom: 14),
-              child: Text((vm.city != null ? tr('{salons} in {city}', {'salons': plural(list.length, 'salon'), 'city': vm.city}) : plural(list.length, 'salon')).toUpperCase(), style: T.eyebrow(context)),
+              child: Text(
+                (vm.city != null ? tr('{salons} in {city}', {'salons': plural(list.length, 'salon'), 'city': vm.city}) : plural(list.length, 'salon')).toUpperCase(),
+                style: T.eyebrow(context),
+              ),
             ),
           ),
           ...staggered([for (final s in list) Padding(padding: const EdgeInsets.only(bottom: 28), child: SalonCard(s))], 5),

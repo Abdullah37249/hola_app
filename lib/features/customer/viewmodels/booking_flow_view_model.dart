@@ -10,8 +10,33 @@ import 'customer_lookups.dart';
 /// booking or to move an existing one ([rescheduling]).
 class SlotPickerViewModel extends RepoViewModel with CustomerLookups {
   SlotPickerViewModel(this.salons, this.auth, this.bookings, {required this.branchId, required this.serviceIds, this.staffId, this.rescheduling}) : super(bookings) {
-    _pickFirstOpenDay();
+    if (fromServer) {
+      load();
+    } else {
+      _pickFirstOpenDay();
+    }
   }
+
+  /// HOLA salons: free times come from the server, two weeks at a time.
+  bool get fromServer => salons.salon(salons.branch(branchId)?.salonId ?? '')?.hola ?? false;
+  bool fetching = false;
+  String? loadError;
+
+  Future<void> load() async {
+    fetching = true;
+    loadError = null;
+    notify();
+    try {
+      await bookings.loadAvailability(branchId: branchId, serviceIds: serviceIds, staffId: staffId, from: today, days: horizon);
+      _pickFirstOpenDay();
+    } on DomainError catch (e) {
+      loadError = e.message;
+    } finally {
+      fetching = false;
+      notify();
+    }
+  }
+
   @override
   final SalonRepository salons;
   @override
@@ -23,7 +48,7 @@ class SlotPickerViewModel extends RepoViewModel with CustomerLookups {
   final String? rescheduling;
 
   static const horizon = 14;
-  late DateTime day;
+  DateTime day = today; // moved to the first open day once times load
   DateTime? time;
 
   List<DateTime> get days => [for (var i = 0; i < horizon; i++) addDays(today, i)];
@@ -68,6 +93,10 @@ class SlotPickerViewModel extends RepoViewModel with CustomerLookups {
   void setStaff(String? id) {
     staffId = id;
     time = null;
+    if (fromServer) {
+      load();
+      return;
+    }
     _pickFirstOpenDay();
     notify();
   }
@@ -91,8 +120,15 @@ class BookingFlowViewModel extends SlotPickerViewModel {
   List<(StaffProfile, String)> get pros => team(salonId);
   String? get staffName => staffId == null ? null : personName(staffId!);
 
-  bool get canContinue => switch (step) { 1 => true, 2 => time != null, _ => !busy };
-  String get primaryLabel => switch (step) { 3 => (salonInfo?.autoConfirm ?? false) ? tr('Book now') : tr('Send request'), _ => tr('Continue') };
+  bool get canContinue => switch (step) {
+    1 => true,
+    2 => time != null,
+    _ => !busy,
+  };
+  String get primaryLabel => switch (step) {
+    3 => (salonInfo?.autoConfirm ?? false) ? tr('Book now') : tr('Send request'),
+    _ => tr('Continue'),
+  };
 
   void go(int d) {
     step = (step + d).clamp(1, 3);
@@ -108,6 +144,7 @@ class BookingFlowViewModel extends SlotPickerViewModel {
       // Slot was taken meanwhile: send the customer back to pick again.
       time = null;
       step = 2;
+      if (fromServer) load();
       rethrow;
     } finally {
       busy = false;

@@ -23,13 +23,15 @@ class _RootState extends State<Root> {
     final Widget body = !s.ready
         ? const SizedBox()
         : !s.signedIn
-            ? const WelcomeView(key: ValueKey('welcome'))
-            : s.needsSalonSetup
-                ? const SalonSetupPage(key: ValueKey('setup'))
-                : Shell(key: ValueKey('shell-${s.account!.id}'));
-    return Stack(children: [
-      AnimatedSwitcher(duration: const Duration(milliseconds: 420), child: body),
-      if (_splash) SplashView(ready: s.ready, onDone: () => setState(() => _splash = false)),
-    ]);
+        ? const WelcomeView(key: ValueKey('welcome'))
+        : s.needsSalonSetup
+        ? const SalonSetupPage(key: ValueKey('setup'))
+        : Shell(key: ValueKey('shell-${s.account!.id}'));
+    return Stack(
+      children: [
+        AnimatedSwitcher(duration: const Duration(milliseconds: 420), child: body),
+        if (_splash) SplashView(ready: s.ready, onDone: () => setState(() => _splash = false)),
+      ],
+    );
   }
 }

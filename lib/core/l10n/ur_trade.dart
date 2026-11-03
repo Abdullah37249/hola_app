@@ -42,7 +42,8 @@ const Map<String, String> urTrade = {
   'Low stock': 'کم اسٹاک',
   'All': 'سب',
   'No products yet': 'ابھی کوئی پروڈکٹ نہیں',
-  'Add HOLA products with their sizes or shades, trade prices and stock. Salons can order them straight away.': 'HOLA پروڈکٹس ان کے سائز یا شیڈز، ٹریڈ قیمتوں اور اسٹاک کے ساتھ شامل کریں۔ سیلون انہیں فوراً آرڈر کر سکتے ہیں۔',
+  'Add HOLA products with their sizes or shades, trade prices and stock. Salons can order them straight away.':
+      'HOLA پروڈکٹس ان کے سائز یا شیڈز، ٹریڈ قیمتوں اور اسٹاک کے ساتھ شامل کریں۔ سیلون انہیں فوراً آرڈر کر سکتے ہیں۔',
   'Add the first product': 'پہلی پروڈکٹ شامل کریں',
   '{category} · from {price}': '{category} · {price} سے شروع',
   'Hidden': 'پوشیدہ',
@@ -169,7 +170,8 @@ const Map<String, String> urTrade = {
   'New order': 'نیا آرڈر',
   'HOLA professional products for {salon}': '{salon} کے لیے HOLA پروفیشنل پروڈکٹس',
   'View statement': 'اسٹیٹمنٹ دیکھیں',
-  'Product orders open once a HOLA sales officer verifies your salon. Customers can already find and book you.': 'HOLA سیلز آفیسر کی جانب سے آپ کے سیلون کی تصدیق کے بعد پروڈکٹ آرڈرز کھل جائیں گے۔ کسٹمرز آپ کو پہلے ہی ڈھونڈ کر بک کر سکتے ہیں۔',
+  'Product orders open once a HOLA sales officer verifies your salon. Customers can already find and book you.':
+      'HOLA سیلز آفیسر کی جانب سے آپ کے سیلون کی تصدیق کے بعد پروڈکٹ آرڈرز کھل جائیں گے۔ کسٹمرز آپ کو پہلے ہی ڈھونڈ کر بک کر سکتے ہیں۔',
   'Open': 'جاری',
   'No orders yet': 'ابھی کوئی آرڈر نہیں',
   'Nothing here': 'یہاں کچھ نہیں',
@@ -198,7 +200,8 @@ const Map<String, String> urTrade = {
   'Place order': 'آرڈر دیں',
   'Order sent for credit review': 'آرڈر کریڈٹ جائزے کے لیے بھیج دیا گیا',
   'ORDER SUMMARY': 'آرڈر کا خلاصہ',
-  'This is {amount} over your available credit. It goes to HOLA for credit review before it ships.': 'یہ آپ کے دستیاب کریڈٹ سے {amount} زیادہ ہے۔ روانگی سے پہلے یہ کریڈٹ جائزے کے لیے HOLA کے پاس جائے گا۔',
+  'This is {amount} over your available credit. It goes to HOLA for credit review before it ships.':
+      'یہ آپ کے دستیاب کریڈٹ سے {amount} زیادہ ہے۔ روانگی سے پہلے یہ کریڈٹ جائزے کے لیے HOLA کے پاس جائے گا۔',
   'Pay {amount} in cash to the rider when the order arrives.': 'آرڈر پہنچنے پر رائیڈر کو {amount} نقد ادا کریں۔',
   'Notes for HOLA (optional)': 'HOLA کے لیے نوٹس (اختیاری)',
   'e.g. Deliver after 2 pm': 'مثلاً دوپہر 2 بجے کے بعد ڈیلیور کریں',

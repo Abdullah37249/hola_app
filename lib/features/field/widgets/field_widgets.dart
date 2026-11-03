@@ -19,26 +19,29 @@ class ProgressRing extends StatelessWidget {
   const ProgressRing({super.key, required this.done, required this.total, this.label = 'visits', this.size = 92});
   @override
   Widget build(BuildContext context) => SizedBox(
-        width: size,
-        height: size,
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: total == 0 ? 0 : done / total),
-          duration: const Duration(milliseconds: 1100),
-          curve: kEase,
-          builder: (_, v, _) => CustomPaint(
-            painter: _RingPainter(v, context.c.bg2),
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('$done/$total', style: T.h3(context)),
-                  Text(tr(label), style: T.cap(context)),
-                ]),
-              ),
+    width: size,
+    height: size,
+    child: TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: total == 0 ? 0 : done / total),
+      duration: const Duration(milliseconds: 1100),
+      curve: kEase,
+      builder: (_, v, _) => CustomPaint(
+        painter: _RingPainter(v, context.c.bg2),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('$done/$total', style: T.h3(context)),
+                Text(tr(label), style: T.cap(context)),
+              ],
             ),
           ),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _RingPainter extends CustomPainter {
@@ -48,7 +51,16 @@ class _RingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size s) {
     final r = Rect.fromCircle(center: s.center(Offset.zero), radius: s.shortestSide / 2 - 6);
-    canvas.drawArc(r, 0, 2 * math.pi, false, Paint()..style = PaintingStyle.stroke..strokeWidth = 8..color = track);
+    canvas.drawArc(
+      r,
+      0,
+      2 * math.pi,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 8
+        ..color = track,
+    );
     if (v <= 0) return;
     canvas.drawArc(
       r,
@@ -73,13 +85,13 @@ class KpiStrip extends StatelessWidget {
   const KpiStrip(this.tiles, {super.key});
   @override
   Widget build(BuildContext context) => IntrinsicHeight(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (var i = 0; i < tiles.length; i++) ...[
-            if (i > 0) const SizedBox(width: 10),
-            Expanded(child: tiles[i]),
-          ],
-        ]),
-      );
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < tiles.length; i++) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: tiles[i])],
+      ],
+    ),
+  );
 }
 
 /// "10:00 am – 8:00 pm" or "Closed".
@@ -101,22 +113,45 @@ class SalonTile extends StatelessWidget {
     return HCard(
       onTap: onTap,
       padding: const EdgeInsets.all(14),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 56, height: 56, child: SalonArt(salon.palette, photo: salon.cover, n: 2, radius: 14, name: salon.name)),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(salon.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
-            Text([place, owner].where((x) => x.isNotEmpty).join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sm(context).copyWith(color: c.muted)),
-            const SizedBox(height: 8),
-            Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              StatusBadge(salon.status),
-              Text(plural(services, 'service'), style: T.cap(context)),
-            ]),
-          ]),
-        ),
-        Padding(padding: const EdgeInsets.only(top: 18), child: HIcon('chev', size: 18, color: c.subtle)),
-      ]),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 56,
+            height: 56,
+            child: SalonArt(salon.palette, photo: salon.cover, n: 2, radius: 14, name: salon.name),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(salon.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
+                Text(
+                  [place, owner].where((x) => x.isNotEmpty).join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: T.sm(context).copyWith(color: c.muted),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    StatusBadge(salon.status),
+                    Text(plural(services, 'service'), style: T.cap(context)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 18),
+            child: HIcon('chev', size: 18, color: c.subtle),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -142,24 +177,40 @@ class VisitTile extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(children: [
-          SizedBox(
-            width: 64,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(fmtTime(v.plannedFor), style: T.sm(context).copyWith(color: c.ink, fontWeight: FontWeight.w600)),
-              if (showDate) Text(dayLabel(v.plannedFor, today), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.cap(context)),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(salon, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context).copyWith(decoration: v.status == VisitStatus.cancelled ? TextDecoration.lineThrough : null)),
-              Text([place, tr(v.purpose)].where((x) => x.isNotEmpty).join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.cap(context)),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          ToneBadge(label, tone: tone, live: v.status == VisitStatus.checkedIn),
-        ]),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 64,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    fmtTime(v.plannedFor),
+                    style: T.sm(context).copyWith(color: c.ink, fontWeight: FontWeight.w600),
+                  ),
+                  if (showDate) Text(dayLabel(v.plannedFor, today), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.cap(context)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    salon,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: T.ttl(context).copyWith(decoration: v.status == VisitStatus.cancelled ? TextDecoration.lineThrough : null),
+                  ),
+                  Text([place, tr(v.purpose)].where((x) => x.isNotEmpty).join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.cap(context)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            ToneBadge(label, tone: tone, live: v.status == VisitStatus.checkedIn),
+          ],
+        ),
       ),
     );
   }
@@ -171,14 +222,13 @@ class CardList extends StatelessWidget {
   const CardList(this.children, {super.key});
   @override
   Widget build(BuildContext context) => HCard(
-        padding: EdgeInsets.zero,
-        child: Column(children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const HDivider(),
-            children[i],
-          ],
-        ]),
-      );
+    padding: EdgeInsets.zero,
+    child: Column(
+      children: [
+        for (var i = 0; i < children.length; i++) ...[if (i > 0) const HDivider(), children[i]],
+      ],
+    ),
+  );
 }
 
 /// Sheet: pick a salon from [salons] (searchable). Returns its id.
@@ -192,26 +242,42 @@ Future<String?> pickSalon(BuildContext context, {required String title, required
 
   return showHSheet<String>(
     context,
-    (ctx) => StatefulBuilder(builder: (ctx, set) {
-      final list = salons.where((s) => '${s.name} ${place(s)}'.toLowerCase().contains(q.toLowerCase().trim())).toList();
-      return VStack(gap: 10, [
-        SheetHead(title, sub: note),
-        if (salons.length > 5) HField(hint: tr('Search salons'), icon: 'search', onChanged: (v) => set(() => q = v)),
-        if (salons.isEmpty)
-          Padding(padding: const EdgeInsets.symmetric(vertical: 20), child: Text(tr('No salons available yet.'), textAlign: TextAlign.center, style: T.sm(ctx).copyWith(color: ctx.c.muted)))
-        else if (list.isEmpty)
-          Padding(padding: const EdgeInsets.symmetric(vertical: 20), child: Text(tr('No salon matches "{q}".', {'q': q}), textAlign: TextAlign.center, style: T.sm(ctx).copyWith(color: ctx.c.muted)))
-        else
-          for (final s in list.take(30))
-            OptionTile(
-              title: s.name,
-              sub: place(s),
-              on: false,
-              trailing: HIcon('chev', size: 18, color: ctx.c.subtle),
-              onTap: () => Navigator.pop(ctx, s.id),
-            ),
-      ]);
-    }),
+    (ctx) => StatefulBuilder(
+      builder: (ctx, set) {
+        final list = salons.where((s) => '${s.name} ${place(s)}'.toLowerCase().contains(q.toLowerCase().trim())).toList();
+        return VStack(gap: 10, [
+          SheetHead(title, sub: note),
+          if (salons.length > 5) HField(hint: tr('Search salons'), icon: 'search', onChanged: (v) => set(() => q = v)),
+          if (salons.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                tr('No salons available yet.'),
+                textAlign: TextAlign.center,
+                style: T.sm(ctx).copyWith(color: ctx.c.muted),
+              ),
+            )
+          else if (list.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                tr('No salon matches "{q}".', {'q': q}),
+                textAlign: TextAlign.center,
+                style: T.sm(ctx).copyWith(color: ctx.c.muted),
+              ),
+            )
+          else
+            for (final s in list.take(30))
+              OptionTile(
+                title: s.name,
+                sub: place(s),
+                on: false,
+                trailing: HIcon('chev', size: 18, color: ctx.c.subtle),
+                onTap: () => Navigator.pop(ctx, s.id),
+              ),
+        ]);
+      },
+    ),
   );
 }
 
@@ -235,57 +301,91 @@ Future<void> planVisitSheet(BuildContext context, {String? salonId, DateTime? da
 
   await showHSheet<void>(
     context,
-    (ctx) => StatefulBuilder(builder: (ctx, set) {
-      final c = ctx.c;
-      Widget picker(String icon, String label, String value, VoidCallback onTap) => Expanded(
-            child: HCard(
-              onTap: onTap,
-              color: c.bg2,
-              shadow: const [],
-              padding: const EdgeInsets.all(12),
-              child: Row(children: [
+    (ctx) => StatefulBuilder(
+      builder: (ctx, set) {
+        final c = ctx.c;
+        Widget picker(String icon, String label, String value, VoidCallback onTap) => Expanded(
+          child: HCard(
+            onTap: onTap,
+            color: c.bg2,
+            shadow: const [],
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
                 HIcon(icon, size: 20, color: c.brandText),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(label, style: T.cap(ctx)),
-                    Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sm(ctx).copyWith(color: c.ink, fontWeight: FontWeight.w600)),
-                  ]),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: T.cap(ctx)),
+                      Text(
+                        value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: T.sm(ctx).copyWith(color: c.ink, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
                 ),
-              ]),
+              ],
             ),
-          );
-      return VStack(gap: 14, [
-        SheetHead(tr('Plan a visit'), sub: s.name),
-        Row(children: [
-          picker('cal', tr('Date'), dayLabel(date, today), () async {
-            final d = await showDatePicker(context: ctx, initialDate: date, firstDate: today, lastDate: addDays(today, 180));
-            if (d != null) set(() => date = d);
-          }),
-          const SizedBox(width: 10),
-          picker('clock', tr('Time'), time.format(ctx), () async {
-            final t = await showTimePicker(context: ctx, initialTime: time);
-            if (t != null) set(() => time = t);
-          }),
-        ]),
-        Text(tr('Purpose'), style: T.sm(ctx).copyWith(color: c.ink, fontWeight: FontWeight.w600)),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final p in visitPurposes)
-            HChip(tr(p), on: purpose == p, onTap: () => set(() {
-                  purpose = p;
-                  purposeCtl.text = p;
-                })),
-        ]),
-        HField(hint: tr('Or describe the purpose'), controller: purposeCtl, onChanged: (v) => set(() => purpose = v)),
-        HButton(tr('Plan visit'), icon: 'pin', block: true, onTap: purpose.trim().length < 3
-            ? null
-            : () async {
-                final at = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-                final ok = await attempt(() => field.planVisit(salonId: sid, at: at, purpose: purpose), success: tr('Visit planned for {day}, {time}', {'day': sameDay(at, today) ? tr('today') : dLabel(at), 'time': fmtTime(at)}), icon: 'pin');
-                if (ok && ctx.mounted) Navigator.pop(ctx);
+          ),
+        );
+        return VStack(gap: 14, [
+          SheetHead(tr('Plan a visit'), sub: s.name),
+          Row(
+            children: [
+              picker('cal', tr('Date'), dayLabel(date, today), () async {
+                final d = await showDatePicker(context: ctx, initialDate: date, firstDate: today, lastDate: addDays(today, 180));
+                if (d != null) set(() => date = d);
               }),
-      ]);
-    }),
+              const SizedBox(width: 10),
+              picker('clock', tr('Time'), time.format(ctx), () async {
+                final t = await showTimePicker(context: ctx, initialTime: time);
+                if (t != null) set(() => time = t);
+              }),
+            ],
+          ),
+          Text(
+            tr('Purpose'),
+            style: T.sm(ctx).copyWith(color: c.ink, fontWeight: FontWeight.w600),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final p in visitPurposes)
+                HChip(
+                  tr(p),
+                  on: purpose == p,
+                  onTap: () => set(() {
+                    purpose = p;
+                    purposeCtl.text = p;
+                  }),
+                ),
+            ],
+          ),
+          HField(hint: tr('Or describe the purpose'), controller: purposeCtl, onChanged: (v) => set(() => purpose = v)),
+          HButton(
+            tr('Plan visit'),
+            icon: 'pin',
+            block: true,
+            onTap: purpose.trim().length < 3
+                ? null
+                : () async {
+                    final at = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+                    final ok = await attempt(
+                      () => field.planVisit(salonId: sid, at: at, purpose: purpose),
+                      success: tr('Visit planned for {day}, {time}', {'day': sameDay(at, today) ? tr('today') : dLabel(at), 'time': fmtTime(at)}),
+                      icon: 'pin',
+                    );
+                    if (ok && ctx.mounted) Navigator.pop(ctx);
+                  },
+          ),
+        ]);
+      },
+    ),
   );
 }
 
@@ -296,12 +396,12 @@ class IconTile extends StatelessWidget {
   const IconTile(this.icon, {super.key, this.size = 40});
   @override
   Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(color: context.c.brandSoft, borderRadius: BorderRadius.circular(size * .3)),
-        alignment: Alignment.center,
-        child: HIcon(icon, size: size * .5, color: context.c.brandText),
-      );
+    width: size,
+    height: size,
+    decoration: BoxDecoration(color: context.c.brandSoft, borderRadius: BorderRadius.circular(size * .3)),
+    alignment: Alignment.center,
+    child: HIcon(icon, size: size * .5, color: context.c.brandText),
+  );
 }
 
 /// Small rounded count, e.g. on "Needs attention" rows.
@@ -317,7 +417,10 @@ class CountPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: strong ? c.brand : c.bg2, borderRadius: BorderRadius.circular(999)),
       alignment: Alignment.center,
-      child: Text('$n', style: T.cap(context).copyWith(color: strong ? Colors.white : c.ink, fontWeight: FontWeight.w700)),
+      child: Text(
+        '$n',
+        style: T.cap(context).copyWith(color: strong ? Colors.white : c.ink, fontWeight: FontWeight.w700),
+      ),
     );
   }
 }

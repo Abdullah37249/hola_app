@@ -4,6 +4,7 @@ import '../features/customer/customer.dart';
 import '../features/field/field.dart';
 import '../features/rider/rider.dart';
 import '../features/salon/salon.dart';
+import '../features/trade/trade.dart';
 
 class TabDef {
   final String id, label, icon;
@@ -17,21 +18,14 @@ final Map<String, List<TabDef>> tabsFor = {
     TabDef('home', 'Home', 'home', () => const CustomerHome()),
     TabDef('explore', 'Explore', 'search', () => const CustomerExplore()),
     TabDef('bookings', 'Bookings', 'cal', () => const CustomerBookings()),
-    TabDef('shop', 'Products', 'bag', () => const CustomerShop()),
     TabDef('profile', 'Profile', 'user', () => const CustomerProfile()),
   ],
   'salon': [
     TabDef('today', 'Today', 'home', () => const SalonToday()),
     TabDef('calendar', 'Calendar', 'cal', () => const SalonCalendar()),
-    TabDef('team', 'Team', 'users', () => const SalonTeam()),
-    TabDef('menu', 'Menu', 'scissors', () => const SalonMenu()),
+    TabDef('products', 'Products', 'box', () => const SalonProductsTab()),
+    TabDef('training', 'Training', 'grad', () => const SalonTrainingTab()),
     TabDef('more', 'More', 'grid', () => const SalonMore()),
-  ],
-  'sstaff': [
-    TabDef('today', 'My day', 'home', () => const SStaffToday()),
-    TabDef('calendar', 'Calendar', 'cal', () => const SalonCalendar()),
-    TabDef('training', 'Training', 'grad', () => const SStaffTraining()),
-    TabDef('more', 'More', 'grid', () => const SStaffMore()),
   ],
   'field': [
     TabDef('today', 'Today', 'home', () => const FieldToday()),
@@ -40,9 +34,6 @@ final Map<String, List<TabDef>> tabsFor = {
     TabDef('orders', 'Orders', 'box', () => const FieldOrders()),
     TabDef('more', 'More', 'grid', () => const FieldMore()),
   ],
-  'rider': [
-    TabDef('today', 'Deliveries', 'truck', () => const RiderToday()),
-    TabDef('cash', 'Cash', 'cash', () => const RiderCash()),
-    TabDef('more', 'More', 'grid', () => const RiderMore()),
-  ],
+  'trainer': [TabDef('training', 'Training', 'grad', () => const TrainerHome()), TabDef('more', 'More', 'grid', () => const TrainerMore())],
+  'rider': [TabDef('today', 'Deliveries', 'truck', () => const RiderToday()), TabDef('cash', 'Cash', 'cash', () => const RiderCash()), TabDef('more', 'More', 'grid', () => const RiderMore())],
 };
