@@ -794,4 +794,12 @@ const Map<String, String> urTeam = {
   'Some items are no longer in HOLA’s catalogue. Remove them and try again.': 'کچھ آئٹمز اب HOLA کے کیٹلاگ میں نہیں ہیں۔ انہیں ہٹا کر دوبارہ کوشش کریں۔',
   'Your profile was changed on another device. Check it and save again.': 'آپ کی پروفائل کسی اور ڈیوائس پر بدلی گئی ہے۔ اسے دیکھ کر دوبارہ محفوظ کریں۔',
   'Show more ({n} left)': 'مزید دکھائیں ({n} باقی)',
+  'Back': 'واپس',
+  'Save salon': 'سیلون محفوظ کریں',
+  'Show map': 'نقشہ دکھائیں',
+  'Show list': 'فہرست دکھائیں',
+  'Search': 'تلاش',
+  'Filter': 'فلٹر',
+  'Mark all as read': 'سب کو پڑھا ہوا کریں',
+  'Copy': 'کاپی',
 };

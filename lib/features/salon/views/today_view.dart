@@ -252,7 +252,7 @@ class _TodayProducts extends StatelessWidget {
                   children: [
                     for (final p in list)
                       Padding(
-                        padding: const EdgeInsets.only(right: 12),
+                        padding: const EdgeInsetsDirectional.only(end: 12),
                         child: _ProductMini(p, onTap: shop),
                       ),
                   ],

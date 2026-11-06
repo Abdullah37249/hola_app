@@ -719,7 +719,7 @@ class _UTabs extends StatelessWidget {
           children: [
             for (final o in opts)
               Padding(
-                padding: const EdgeInsets.only(right: 22),
+                padding: const EdgeInsetsDirectional.only(end: 22),
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () {

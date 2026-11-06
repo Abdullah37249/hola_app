@@ -4,6 +4,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import 'package:hola_professional/core/l10n/l10n.dart';
 import 'package:hola_professional/core/utils/format.dart';
 import 'package:hola_professional/core/utils/photo_files.dart';
 import 'package:hola_professional/core/theme/icons.dart';
@@ -23,6 +24,18 @@ export 'states.dart';
 // ───────────────────────── motion ─────────────────────────
 
 /// Staggered "rise" entrance (prototype `.rv`). [i] is the stagger index.
+/// "Reduce motion" in the phone's settings: a looping animation holds still
+/// at [rest]; otherwise it keeps (or starts) looping.
+void loopUnlessReduced(BuildContext context, AnimationController c, {bool reverse = false, double rest = 0}) {
+  if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+    c
+      ..stop()
+      ..value = rest;
+  } else if (!c.isAnimating) {
+    c.repeat(reverse: reverse);
+  }
+}
+
 class Reveal extends StatefulWidget {
   final Widget child;
   final int i;
@@ -105,7 +118,11 @@ class Tap extends StatefulWidget {
   final VoidCallback? onTap;
   final double scale;
   final bool sound;
-  const Tap({super.key, required this.child, this.onTap, this.scale = .97, this.sound = true});
+
+  /// What a screen reader says for it (TalkBack / VoiceOver); without one it
+  /// reads the text inside. Either way it's announced as a button.
+  final String? label;
+  const Tap({super.key, required this.child, this.onTap, this.scale = .97, this.sound = true, this.label});
   @override
   State<Tap> createState() => _TapState();
 }
@@ -115,16 +132,20 @@ class _TapState extends State<Tap> {
   @override
   Widget build(BuildContext context) {
     if (widget.onTap == null) return widget.child;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => setState(() => _d = true),
-      onTapCancel: () => setState(() => _d = false),
-      onTapUp: (_) => setState(() => _d = false),
-      onTap: () {
-        if (widget.sound) Sfx.tap();
-        widget.onTap!();
-      },
-      child: AnimatedScale(scale: _d ? widget.scale : 1, duration: const Duration(milliseconds: 120), curve: kEase, child: widget.child),
+    return Semantics(
+      button: true,
+      label: widget.label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => setState(() => _d = true),
+        onTapCancel: () => setState(() => _d = false),
+        onTapUp: (_) => setState(() => _d = false),
+        onTap: () {
+          if (widget.sound) Sfx.tap();
+          widget.onTap!();
+        },
+        child: AnimatedScale(scale: _d ? widget.scale : 1, duration: const Duration(milliseconds: 120), curve: kEase, child: widget.child),
+      ),
     );
   }
 }
@@ -326,13 +347,37 @@ class IconBtn extends StatelessWidget {
   final int dot;
   final bool onBand, raised;
   final Color? color;
-  const IconBtn(this.icon, {super.key, this.onTap, this.dot = 0, this.onBand = false, this.raised = false, this.color});
+
+  /// Spoken name for this icon-only button; defaults from the icon.
+  final String? label;
+  const IconBtn(this.icon, {super.key, this.onTap, this.dot = 0, this.onBand = false, this.raised = false, this.color, this.label});
+
+  static String? _named(String icon) => switch (icon) {
+    'back' => 'Back',
+    'x' => 'Close',
+    'phone' => 'Call',
+    'bell' => 'Notifications',
+    'heart' => 'Save salon',
+    'map' => 'Show map',
+    'list' => 'Show list',
+    'search' => 'Search',
+    'filter' => 'Filter',
+    'edit' => 'Edit',
+    'msg' => 'Message',
+    'check' => 'Mark all as read',
+    'chev' => 'Open',
+    'clip' => 'Copy',
+    'more' || 'grid' => 'More',
+    _ => null,
+  };
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final spoken = label ?? (_named(icon) == null ? null : tr(_named(icon)!));
     return Tap(
       onTap: onTap,
       scale: .92,
+      label: spoken,
       child: SizedBox(
         width: 44,
         height: 44,
@@ -386,7 +431,14 @@ class _Pulse extends StatefulWidget {
 }
 
 class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat();
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    loopUnlessReduced(context, _c, rest: 0);
+  }
+
   @override
   void dispose() {
     _c.dispose();
@@ -516,7 +568,14 @@ class _Blink extends StatefulWidget {
 }
 
 class _BlinkState extends State<_Blink> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 600))..repeat(reverse: true);
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    loopUnlessReduced(context, _c, reverse: true, rest: 0);
+  }
+
   @override
   void dispose() {
     _c.dispose();
@@ -867,7 +926,7 @@ class HField extends StatelessWidget {
                 prefixIcon: icon == null
                     ? null
                     : Padding(
-                        padding: const EdgeInsets.only(left: 14, right: 10),
+                        padding: const EdgeInsetsDirectional.only(start: 14, end: 10),
                         child: AnimatedScale(
                           scale: focused ? 1.1 : 1,
                           duration: const Duration(milliseconds: 220),
@@ -1138,7 +1197,14 @@ class _Float extends StatefulWidget {
 }
 
 class _FloatState extends State<_Float> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2400))..repeat(reverse: true);
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2400));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    loopUnlessReduced(context, _c, reverse: true, rest: .5);
+  }
+
   @override
   void dispose() {
     _c.dispose();

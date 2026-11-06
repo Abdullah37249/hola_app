@@ -83,7 +83,7 @@ class SalonPhotos extends StatelessWidget {
         children: [
           if (photos.length < maxSalonPhotos && PhotoFiles.available)
             Padding(
-              padding: const EdgeInsets.only(right: 10),
+              padding: const EdgeInsetsDirectional.only(end: 10),
               child: tile(
                 onTap: () => _add(context),
                 child: DecoratedBox(
@@ -108,7 +108,7 @@ class SalonPhotos extends StatelessWidget {
             ),
           for (final (i, p) in photos.indexed)
             Padding(
-              padding: const EdgeInsets.only(right: 10),
+              padding: const EdgeInsetsDirectional.only(end: 10),
               child: Reveal(
                 key: ValueKey(p),
                 child: tile(

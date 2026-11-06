@@ -60,7 +60,7 @@ class HolaColors extends ThemeExtension<HolaColors> {
     ink: Color(0xFF0A1020),
     body: Color(0xFF2E3747),
     muted: Color(0xFF66708A),
-    subtle: Color(0xFF9AA3B8),
+    subtle: Color(0xFF667086), // 4.6:1 on bg, 5:1 on cards (WCAG AA)
     bg: Color(0xFFF3F6FC),
     bg2: Color(0xFFE7EDF7),
     surface: Colors.white,
@@ -104,7 +104,7 @@ class HolaColors extends ThemeExtension<HolaColors> {
     ink: Color(0xFFF5F8FF),
     body: Color(0xFFD3DCEB),
     muted: Color(0xFF8D9AB3),
-    subtle: Color(0xFF56647E),
+    subtle: Color(0xFF7A87A0), // 5.1:1 on cards (WCAG AA)
     bg: Color(0xFF02050C),
     bg2: Color(0xFF081022),
     surface: Color(0xFF0A1428),

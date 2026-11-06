@@ -88,7 +88,7 @@ class _ExploreBodyState extends State<_ExploreBody> {
                 filled: true,
                 fillColor: c.surface,
                 prefixIcon: Padding(
-                  padding: const EdgeInsets.only(left: 14, right: 10),
+                  padding: const EdgeInsetsDirectional.only(start: 14, end: 10),
                   child: HIcon('search', size: 20, color: c.muted),
                 ),
                 prefixIconConstraints: const BoxConstraints(minWidth: 0),

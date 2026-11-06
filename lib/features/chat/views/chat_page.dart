@@ -313,7 +313,7 @@ class _ChatState extends State<_Chat> {
                       children: [
                         for (final p in _photos)
                           Padding(
-                            padding: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsetsDirectional.only(end: 8),
                             child: Stack(
                               clipBehavior: Clip.none,
                               children: [
@@ -321,17 +321,28 @@ class _ChatState extends State<_Chat> {
                                   borderRadius: BorderRadius.circular(12),
                                   child: Image.file(File(p), width: 66, height: 66, fit: BoxFit.cover, cacheWidth: 200),
                                 ),
-                                Positioned(
-                                  right: -6,
-                                  top: -6,
+                                // A 40 px tap area inside the photo (the old one sat
+                                // half outside it, where taps don't register).
+                                PositionedDirectional(
+                                  end: 0,
+                                  top: 0,
                                   child: Tap(
                                     onTap: () => setState(() => _photos.remove(p)),
-                                    child: Container(
-                                      width: 22,
-                                      height: 22,
-                                      decoration: BoxDecoration(color: c.ink, shape: BoxShape.circle),
-                                      alignment: Alignment.center,
-                                      child: HIcon('x', size: 12, color: c.surface),
+                                    label: tr('Remove photo'),
+                                    child: SizedBox(
+                                      width: 40,
+                                      height: 40,
+                                      child: Align(
+                                        alignment: AlignmentDirectional.topEnd,
+                                        child: Container(
+                                          margin: const EdgeInsets.all(4),
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(color: c.ink, shape: BoxShape.circle),
+                                          alignment: Alignment.center,
+                                          child: HIcon('x', size: 12, color: c.surface),
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -406,7 +417,7 @@ class _ChatState extends State<_Chat> {
                           child: _sending
                               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                               : const Padding(
-                                  padding: EdgeInsets.only(left: 2),
+                                  padding: EdgeInsetsDirectional.only(start: 2),
                                   child: HIcon('nav', size: 20, color: Colors.white),
                                 ),
                         ),
@@ -533,9 +544,9 @@ class _Bubble extends StatelessWidget {
       ),
     );
     return Padding(
-      padding: EdgeInsets.only(top: tight ? 3 : 10, left: mine ? 48 : 0, right: mine ? 0 : 48),
+      padding: EdgeInsetsDirectional.only(top: tight ? 3 : 10, start: mine ? 48 : 0, end: mine ? 0 : 48),
       child: Align(
-        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: mine ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
         child: Reveal(
           child: failed ? GestureDetector(onTap: () => attempt(() => vm.retry(m.id)), child: bubble) : bubble,
         ),

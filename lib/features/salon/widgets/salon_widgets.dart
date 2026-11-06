@@ -435,8 +435,9 @@ class ShiftBar extends StatelessWidget {
                 decoration: BoxDecoration(color: c.bg2, borderRadius: BorderRadius.circular(4)),
               ),
               if (shift case final s?)
-                Positioned(
-                  left: w * ((s.start - dayStart).clamp(0, span) / span),
+                // Mirrors in Urdu: the day runs right to left like its labels.
+                PositionedDirectional(
+                  start: w * ((s.start - dayStart).clamp(0, span) / span),
                   width: w * ((s.end - s.start).clamp(0, span) / span),
                   top: 0,
                   bottom: 0,
@@ -490,14 +491,21 @@ class ApptRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               // Price and status stack on the right, so the time line below gets the full width.
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(rsShort(a.price), style: T.ttl(context)),
-                  const SizedBox(height: 6),
-                  StatusBadge(a.status),
-                  if (a.isWalkIn) ...[const SizedBox(height: 4), ToneBadge(tr('Walk-in'))],
-                ],
+              // Very large text: they shrink to fit rather than push past the edge.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.topEnd,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(rsShort(a.price), style: T.ttl(context)),
+                      const SizedBox(height: 6),
+                      StatusBadge(a.status),
+                      if (a.isWalkIn) ...[const SizedBox(height: 4), ToneBadge(tr('Walk-in'))],
+                    ],
+                  ),
+                ),
               ),
             ],
           ),

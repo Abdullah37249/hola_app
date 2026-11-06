@@ -99,7 +99,7 @@ class _SignInState extends State<_SignIn> {
                 children: [
                   PasswordField(controller: pass, obscure: vm.obscure, onToggle: vm.toggleObscure, action: TextInputAction.done, onSubmitted: (_) => _submit(vm), errors: errors),
                   Align(
-                    alignment: Alignment.centerRight,
+                    alignment: AlignmentDirectional.centerEnd,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () {

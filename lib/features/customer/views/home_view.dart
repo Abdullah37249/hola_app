@@ -172,7 +172,7 @@ class _HomeBody extends StatelessWidget {
         clipBehavior: Clip.none,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [for (final s in list) Padding(padding: const EdgeInsets.only(right: 14), child: SalonMini(s))],
+          children: [for (final s in list) Padding(padding: const EdgeInsetsDirectional.only(end: 14), child: SalonMini(s))],
         ),
       ),
     ),

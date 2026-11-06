@@ -199,7 +199,7 @@ class _Label extends StatelessWidget {
   const _Label(this.t);
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: 4, bottom: 8),
+    padding: const EdgeInsetsDirectional.only(start: 4, bottom: 8),
     child: Text(t.toUpperCase(), style: T.eyebrow(context)),
   );
 }

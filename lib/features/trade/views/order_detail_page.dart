@@ -304,7 +304,7 @@ class _Body extends StatelessWidget {
                   Tap(
                     onTap: () => set(() => stars[l.variantId] = i),
                     child: Padding(
-                      padding: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsetsDirectional.only(end: 6),
                       child: HIcon('star', size: 32, fill: i <= (stars[l.variantId] ?? 0), color: i <= (stars[l.variantId] ?? 0) ? ctx.c.accent : ctx.c.line),
                     ),
                   ),

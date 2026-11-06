@@ -291,31 +291,37 @@ class _TabBar extends StatelessWidget {
                       children: [
                         for (var j = 0; j < tabs.length; j++)
                           Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => onTap(tabs[j].id),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  AnimatedScale(
-                                    scale: j == index ? 1.06 : 1,
-                                    duration: const Duration(milliseconds: 300),
-                                    curve: kSpring,
-                                    child: HIcon(tabs[j].icon, size: 22, color: j == index ? (c.dark ? c.night : Colors.white) : c.muted),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  AnimatedDefaultTextStyle(
-                                    duration: const Duration(milliseconds: 200),
-                                    style: TextStyle(
-                                      fontFamily: T.f,
-                                      fontSize: 11,
-                                      height: 14 / 11,
-                                      fontWeight: j == index ? FontWeight.w700 : FontWeight.w600,
-                                      color: j == index ? (c.dark ? c.night : Colors.white) : c.muted,
+                            child: Semantics(
+                              button: true,
+                              selected: j == index,
+                              label: tr(tabs[j].label),
+                              excludeSemantics: true,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => onTap(tabs[j].id),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    AnimatedScale(
+                                      scale: j == index ? 1.06 : 1,
+                                      duration: const Duration(milliseconds: 300),
+                                      curve: kSpring,
+                                      child: HIcon(tabs[j].icon, size: 22, color: j == index ? (c.dark ? c.night : Colors.white) : c.muted),
                                     ),
-                                    child: Text(tr(tabs[j].label), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  ),
-                                ],
+                                    const SizedBox(height: 2),
+                                    AnimatedDefaultTextStyle(
+                                      duration: const Duration(milliseconds: 200),
+                                      style: TextStyle(
+                                        fontFamily: T.f,
+                                        fontSize: 11,
+                                        height: 14 / 11,
+                                        fontWeight: j == index ? FontWeight.w700 : FontWeight.w600,
+                                        color: j == index ? (c.dark ? c.night : Colors.white) : c.muted,
+                                      ),
+                                      child: Text(tr(tabs[j].label), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),

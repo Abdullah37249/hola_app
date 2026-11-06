@@ -258,7 +258,7 @@ class _CalendarState extends State<_Calendar> {
                                     child: SingleChildScrollView(
                                       controller: _h,
                                       scrollDirection: Axis.horizontal,
-                                      padding: const EdgeInsets.only(right: 8),
+                                      padding: const EdgeInsetsDirectional.only(end: 8),
                                       child: SizedBox(
                                         width: gridW,
                                         child: Column(

@@ -27,7 +27,7 @@ class SlotPicker extends StatelessWidget {
             children: [
               for (final d in vm.days)
                 Padding(
-                  padding: const EdgeInsets.only(right: 8, top: 4, bottom: 8),
+                  padding: const EdgeInsetsDirectional.only(end: 8, top: 4, bottom: 8),
                   child: _DayChip(vm: vm, d: d),
                 ),
             ],

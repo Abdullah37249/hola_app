@@ -186,15 +186,19 @@ class DateTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         boxShadow: live ? const [BoxShadow(color: Color(0x402F80FF), blurRadius: 14, spreadRadius: -6, offset: Offset(0, 8))] : null,
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(months[at.month - 1].toUpperCase(), style: T.eyebrow(context).copyWith(color: fg.withValues(alpha: .85), letterSpacing: 1, height: 1.2)),
-          Text(
-            '${at.day}',
-            style: T.h1(context).copyWith(color: fg, fontSize: size * .46, height: 1.05),
-          ),
-        ],
+      // Large text: the date shrinks to fit the badge instead of spilling out.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(months[at.month - 1].toUpperCase(), style: T.eyebrow(context).copyWith(color: fg.withValues(alpha: .85), letterSpacing: 1, height: 1.2)),
+            Text(
+              '${at.day}',
+              style: T.h1(context).copyWith(color: fg, fontSize: size * .46, height: 1.05),
+            ),
+          ],
+        ),
       ),
     );
   }

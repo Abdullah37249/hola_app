@@ -25,7 +25,30 @@ class LocalDatabase extends ChangeNotifier {
   /// so does fingerprint/Face ID sign-in (kept in secure storage). The next
   /// account on this phone starts clean and syncs its own data from HOLA.
   Future<void> wipeAccountData() async {
-    for (final l in <List<Object>>[accounts, staff, leave, salons, branches, services, offers, appointments, reviews, complaints, threads, messages, notifications, products, orders, credit, returns, productReviews, handovers, visits, trainings, reports]) {
+    for (final l in <List<Object>>[
+      accounts,
+      staff,
+      leave,
+      salons,
+      branches,
+      services,
+      offers,
+      appointments,
+      reviews,
+      complaints,
+      threads,
+      messages,
+      notifications,
+      products,
+      orders,
+      credit,
+      returns,
+      productReviews,
+      handovers,
+      visits,
+      trainings,
+      reports,
+    ]) {
       l.clear();
     }
     sessionAccountId = null;
@@ -35,6 +58,7 @@ class LocalDatabase extends ChangeNotifier {
     commit();
     await flush();
   }
+
   static const _version = 1;
 
   final accounts = <Account>[];
