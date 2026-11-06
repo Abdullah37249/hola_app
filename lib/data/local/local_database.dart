@@ -72,7 +72,20 @@ class LocalDatabase extends ChangeNotifier {
   Future<void> load() async {
     if (_loaded) return;
     final raw = await _storage.read();
-    if (raw != null && raw.isNotEmpty) _fromJson(decodeJson(raw) as Json);
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        _fromJson(decodeJson(raw) as Json);
+      } catch (e) {
+        // A damaged or older-format file must not leave the app stuck on the
+        // splash: start clean (HOLA's data syncs back) but keep device settings.
+        debugPrint('Database: unreadable, starting fresh: $e');
+        final keep = Map<String, Object?>.of(prefs);
+        await wipeAccountData();
+        prefs
+          ..clear()
+          ..addAll(keep);
+      }
+    }
     _loaded = true;
   }
 

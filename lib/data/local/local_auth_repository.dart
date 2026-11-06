@@ -432,6 +432,16 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
       if (phone.trim().isNotEmpty) validatePhone(phone);
       try {
         final cur = await api!.get('/me') as J;
+        // Changed on another phone or the portal since this one last synced:
+        // don't overwrite it; show HOLA's copy and let the person check it.
+        String digits(Object? v) => '${v ?? ''}'.replaceAll(RegExp(r'\D'), '');
+        if ('${cur['fullName'] ?? ''}' != a.name || digits(cur['phone']) != digits(a.phone)) {
+          a
+            ..name = cur['fullName'] as String? ?? a.name
+            ..phone = cur['phone'] as String? ?? '';
+          db.commit();
+          throw DomainError(tr('Your profile was changed on another device. Check it and save again.'));
+        }
         final me2 = await api!.patch('/me', {'fullName': name.trim(), 'phone': phone.trim().isEmpty ? null : _apiPhone(phone), 'version': cur['version']}) as J;
         a
           ..name = me2['fullName'] as String? ?? name.trim()

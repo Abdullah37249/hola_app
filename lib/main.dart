@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'domain/entities/entities.dart';
@@ -23,12 +24,20 @@ import 'core/network/api.dart';
 import 'app/root.dart';
 import 'core/l10n/l10n.dart';
 import 'core/theme/theme.dart';
+import 'core/utils/maps.dart';
 import 'core/utils/photo_files.dart';
 import 'app/viewmodels/session_view_model.dart';
 import 'shared/widgets/fx.dart';
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+  // Safety net: an error from background work nobody awaited (a sync, a
+  // fire-and-forget call) is logged instead of reaching the zone unhandled.
+  // Screen errors still go through FlutterError's own handler.
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Uncaught: $error\n$stack');
+    return true;
+  };
   // Hold the first frame until the splash logo is decoded (a few ms), so the
   // hand-over from the phone's launch screen never shows a frame without it.
   binding.deferFirstFrame();
@@ -117,8 +126,9 @@ class _HolaAppState extends State<HolaApp> {
     final session = context.read<SessionViewModel>();
     if (tap == null || !session.ready || !session.signedIn) return;
     Reminders.instance.tapped.value = null;
-    if (tap.action == Reminders.directions && tap.mapsUrl.isNotEmpty) {
-      final ok = await launchUrl(Uri.parse(tap.mapsUrl), mode: LaunchMode.externalApplication);
+    final maps = tap.action == Reminders.directions ? safeMapsLink(tap.mapsUrl) : null;
+    if (maps != null) {
+      final ok = await launchUrl(maps, mode: LaunchMode.externalApplication);
       if (ok) return;
     }
     await Future<void>.delayed(const Duration(milliseconds: 600)); // let the splash and shell settle

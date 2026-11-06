@@ -244,11 +244,20 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
       if (h != null && h.end <= h.start) throw DomainError(tr('Closing time must be after opening time.'));
     }
     if (_on(b.salonId) case final server?) {
-      await _write(() => server.updateBranch(b, name: name, address: address, area: area, city: city));
-      await _write(() => server.pushHours(Branch(id: b.id, salonId: b.salonId, name: b.name, address: b.address, area: b.area, city: b.city, hours: hours)));
-      b.hours.setAll(0, hours);
-      await _write(() => server.fillEmptySchedules(b.salonId));
-      await _write(() => server.pullTeam(b.salonId));
+      try {
+        await _write(() => server.updateBranch(b, name: name, address: address, area: area, city: city));
+        await _write(() => server.pushHours(Branch(id: b.id, salonId: b.salonId, name: b.name, address: b.address, area: b.area, city: b.city, hours: hours)));
+        await _write(() => server.fillEmptySchedules(b.salonId));
+        await _write(() => server.pullTeam(b.salonId));
+      } catch (_) {
+        // A step failed after earlier ones were saved: show what HOLA now has
+        // (not a mix of old and new), then report the error.
+        try {
+          await server.pullSalon(b.salonId, ownerId: salon(b.salonId)!.ownerId);
+          db.commit();
+        } catch (_) {}
+        rethrow;
+      }
     }
     b
       ..name = name.trim()

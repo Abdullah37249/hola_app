@@ -179,7 +179,11 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
           children: [
             _TabSwap(
               index: i,
-              child: IndexedStack(index: i, children: [for (final t in tabs) _built[t.id] ?? const SizedBox()]),
+              // Hidden tabs stay alive but their animations pause (battery, GPU).
+              child: IndexedStack(
+                index: i,
+                children: [for (final (j, t) in tabs.indexed) TickerMode(enabled: j == i, child: _built[t.id] ?? const SizedBox())],
+              ),
             ),
             Positioned(
               left: 12,

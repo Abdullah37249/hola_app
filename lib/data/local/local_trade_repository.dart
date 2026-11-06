@@ -387,8 +387,12 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     if (!s.isActive) throw DomainError(tr('Trade ordering opens once HOLA verifies the salon.'));
     final lines = quote(cart);
     if (lines.isEmpty) throw DomainError(tr('Your cart is empty.'));
-    // HOLA's catalogue: the order goes to the server, which prices it and reserves stock.
-    if (api != null && lines.every((l) => product(l.productId)?.hola ?? false)) {
+    // With HOLA connected every order goes to the server, which prices it and
+    // reserves stock; a product HOLA doesn't know never becomes a phone-only order.
+    if (api != null && !lines.every((l) => product(l.productId)?.hola ?? false)) {
+      throw DomainError(tr('Some items are no longer in HOLA’s catalogue. Remove them and try again.'));
+    }
+    if (api != null) {
       final branch = db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
       try {
         final res =
@@ -1262,6 +1266,15 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   Future<void> syncCash() async {
     if (!_serverRider) return;
     try {
+      await _fetchCash();
+    } catch (e) {
+      debugPrint('Cash: sync failed: $e'); // offline: keep the last copy
+    }
+  }
+
+  /// The rider's cash in hand from HOLA; throws when HOLA can't be reached.
+  Future<void> _fetchCash() async {
+    {
       final j = await api!.get('/rider/cash') as J;
       _serverCash = [
         for (final p in (j['payments'] as List? ?? const []).cast<Map>())
@@ -1281,8 +1294,6 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       ];
       await _syncHandovers();
       db.commit();
-    } catch (e) {
-      debugPrint('Cash: sync failed: $e'); // offline: keep the last copy
     }
   }
 
@@ -1325,7 +1336,12 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
 
   /// POST /rider/cash-handovers with every payment the rider holds.
   Future<CashHandover> _serverHandOver() async {
-    await syncCash();
+    // Hand over exactly what HOLA says the rider holds now, never a stale copy.
+    try {
+      await _fetchCash();
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
     final held = _serverCash ?? const [];
     if (held.isEmpty) throw DomainError(tr('You have no cash to hand over.'));
     final J h;

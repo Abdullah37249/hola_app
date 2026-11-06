@@ -108,7 +108,11 @@ class _Body extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Column(
                 children: [
-                  for (final (i, r) in rows.indexed) ...[if (i > 0) const HDivider(), _LedgerTile(r)],
+                  for (final (i, r) in rows.take(vm.shown).indexed) ...[if (i > 0) const HDivider(), _LedgerTile(r)],
+                  if (rows.length > vm.shown) ...[
+                    const HDivider(),
+                    TextButton(onPressed: vm.showMore, child: Text(tr('Show more ({n} left)', {'n': rows.length - vm.shown}))),
+                  ],
                 ],
               ),
             ),

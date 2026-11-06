@@ -28,3 +28,13 @@ Future<bool> startNavigation({GeoFix? at, required String address, String? link}
     return false;
   }
 }
+
+/// A maps link that arrived from outside (a push): only https Google Maps
+/// links are opened, never other schemes or hosts.
+Uri? safeMapsLink(String raw) {
+  final u = Uri.tryParse(raw.trim());
+  if (u == null || u.scheme != 'https') return null;
+  final h = u.host.toLowerCase();
+  final google = h == 'google.com' || h.endsWith('.google.com') || h == 'maps.app.goo.gl' || h == 'goo.gl';
+  return google ? u : null;
+}

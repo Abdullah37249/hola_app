@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -21,23 +24,40 @@ class Permissions {
     return PermState.denied;
   }
 
+  /// iPhone notifications: Firebase's own reading, the same one push uses
+  /// (permission_handler reports them as not allowed on iOS 27 even when they are).
+  static PermState _iosPush(AuthorizationStatus a) => switch (a) {
+    AuthorizationStatus.authorized || AuthorizationStatus.provisional => PermState.granted,
+    // iOS asks only once: after a "Don't Allow" it's changed in Settings.
+    AuthorizationStatus.denied || AuthorizationStatus.deniedPermanently => PermState.blocked,
+    AuthorizationStatus.notDetermined => PermState.denied,
+  };
+
+  static bool _iosNotifications(AppPermission p) => p == AppPermission.notifications && Platform.isIOS;
+
   static Future<PermState> status(AppPermission p) async {
     try {
+      if (_iosNotifications(p)) return _iosPush((await FirebaseMessaging.instance.getNotificationSettings()).authorizationStatus);
       return _merge([for (final x in _of(p)) await x.status]);
     } on MissingPluginException {
       return PermState.denied;
     } on PlatformException {
       return PermState.denied;
+    } catch (_) {
+      return PermState.denied; // Firebase not started (tests)
     }
   }
 
   static Future<PermState> request(AppPermission p) async {
     try {
+      if (_iosNotifications(p)) return _iosPush((await FirebaseMessaging.instance.requestPermission()).authorizationStatus);
       final r = await _of(p).request();
       return _merge(r.values.toList());
     } on MissingPluginException {
       return PermState.denied;
     } on PlatformException {
+      return PermState.denied;
+    } catch (_) {
       return PermState.denied;
     }
   }

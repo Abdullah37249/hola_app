@@ -19,7 +19,11 @@ import 'local_auth_repository.dart';
 /// and whenever a `chat_message` push arrives. Without it (tests, or before
 /// the API is live) conversations stay on this phone.
 class LocalChatRepository extends LocalRepository implements ChatRepository {
-  LocalChatRepository(super.db, {this.api});
+  LocalChatRepository(super.db, {this.api}) {
+    // A new account starts its conversation list from scratch, not from the
+    // last account's "updated since" point (that hid all older threads).
+    db.onWipe(() => _since = null);
+  }
   final HolaApi? api;
 
   /// Switched on once HOLA confirms the chat contract on staging.

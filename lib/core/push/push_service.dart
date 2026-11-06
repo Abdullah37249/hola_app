@@ -85,8 +85,13 @@ class PushService {
   void _onAuth() {
     final id = auth.current?.id;
     if (id == _accountId) return;
+    final was = _accountId;
     _accountId = id;
     if (id != null && auth.usesServer) _register();
+    // Signed out without the normal sign-out (session expired, or kept for
+    // fingerprint sign-in): drop this phone's push token so that account's
+    // pushes stop reaching the lock screen. Signing in again registers anew.
+    if (id == null && was != null) _dropToken();
   }
 
   /// One registration at a time; a token refresh during one waits for it.
@@ -149,6 +154,16 @@ class PushService {
       await _fm.deleteToken();
     } catch (e) {
       debugPrint('Push: unregister failed: $e');
+    }
+  }
+
+  Future<void> _dropToken() async {
+    _done = null;
+    try {
+      await _secure.delete(key: _key);
+      await _fm.deleteToken();
+    } catch (e) {
+      debugPrint('Push: could not drop token: $e');
     }
   }
 

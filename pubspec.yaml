@@ -36,6 +36,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # On-device test runs (iPhone/Android), dev only; never shipped.
+  integration_test:
+    sdk: flutter
   flutter_lints: ^5.0.0
 
 flutter:

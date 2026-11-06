@@ -14,7 +14,24 @@ import '../../domain/repositories/repositories.dart';
 class SessionViewModel extends ViewModel {
   SessionViewModel(this._auth, this._prefs, [Biometrics? bio]) : _bio = bio ?? Biometrics() {
     _auth.changes.addListener(_onData);
+    // Fingerprint sign-in on: locked again after 5 minutes away from the app.
+    _life = AppLifecycleListener(
+      onHide: () => _hiddenAt = DateTime.now(),
+      onShow: () {
+        final away = _hiddenAt == null ? Duration.zero : DateTime.now().difference(_hiddenAt!);
+        _hiddenAt = null;
+        if (fingerprintOn && !locked && away > relockAfter) {
+          locked = true;
+          notify();
+        }
+      },
+    );
   }
+
+  /// Time in the background after which fingerprint sign-in locks HOLA again.
+  static const relockAfter = Duration(minutes: 5);
+  AppLifecycleListener? _life;
+  DateTime? _hiddenAt;
   final AuthRepository _auth;
   final PreferencesRepository _prefs;
   final Biometrics _bio;
@@ -33,7 +50,9 @@ class SessionViewModel extends ViewModel {
     // matches. Otherwise the sensor check runs without holding up start-up.
     if (fingerprintOn || _auth.resumable.isNotEmpty) {
       bioAvailable = await _bio.available();
-      locked = bioAvailable && fingerprintOn;
+      // Locked whenever fingerprint sign-in is on, even if the sensor check
+      // failed or timed out: the lock screen offers the password instead.
+      locked = fingerprintOn;
     } else {
       _bio.available().then((v) {
         bioAvailable = v;
@@ -193,6 +212,7 @@ class SessionViewModel extends ViewModel {
 
   @override
   void dispose() {
+    _life?.dispose();
     _auth.changes.removeListener(_onData);
     super.dispose();
   }

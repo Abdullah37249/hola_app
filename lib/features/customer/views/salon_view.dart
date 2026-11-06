@@ -46,7 +46,6 @@ class _SalonBodyState extends State<_SalonBody> {
   @override
   void initState() {
     super.initState();
-    _sc.addListener(() => setState(() {}));
   }
 
   @override
@@ -70,7 +69,6 @@ class _SalonBodyState extends State<_SalonBody> {
       );
     }
     final top = MediaQuery.paddingOf(context).top;
-    final y = _sc.hasClients ? _sc.offset : 0.0;
     final b = vm.currentBranch;
     final r = vm.rating;
     final hasSel = vm.selected.isNotEmpty;
@@ -85,9 +83,18 @@ class _SalonBodyState extends State<_SalonBody> {
               SizedBox(
                 height: 280,
                 child: ClipRect(
-                  child: Transform.translate(
-                    offset: Offset(0, y > 0 ? y * .4 : 0),
-                    child: Transform.scale(scale: y < 0 ? 1 - y / 280 : 1, child: _HeroPhotos(s)),
+                  // Only the photo follows the scroll (parallax); the page
+                  // itself isn't rebuilt on every pixel.
+                  child: AnimatedBuilder(
+                    animation: _sc,
+                    builder: (_, photos) {
+                      final y = _sc.hasClients ? _sc.offset : 0.0;
+                      return Transform.translate(
+                        offset: Offset(0, y > 0 ? y * .4 : 0),
+                        child: Transform.scale(scale: y < 0 ? 1 - y / 280 : 1, child: photos),
+                      );
+                    },
+                    child: _HeroPhotos(s),
                   ),
                 ),
               ),
@@ -159,9 +166,9 @@ class _SalonBodyState extends State<_SalonBody> {
             top: 0,
             left: 0,
             right: 0,
-            child: StatusScrim(
-              show: y > 220,
-              height: 60,
+            child: AnimatedBuilder(
+              animation: _sc,
+              builder: (_, title) => StatusScrim(show: _sc.hasClients && _sc.offset > 220, height: 60, child: title!),
               child: Center(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 120),

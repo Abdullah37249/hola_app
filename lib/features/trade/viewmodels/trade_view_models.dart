@@ -311,6 +311,13 @@ class StatementViewModel extends RepoViewModel {
   /// Credit terms and recording payments: on-device only (HOLA dashboard otherwise).
   bool get canManage => isOfficer && trade.officerToolsOnPhone;
 
+  /// Entries drawn at once; the newest first, 100 more on "Show more".
+  int shown = 100;
+  void showMore() {
+    shown += 100;
+    notify();
+  }
+
   /// Newest first, each with the running balance after it.
   List<LedgerRow> get ledger {
     final oldest = trade.statement(salonId).reversed;

@@ -33,16 +33,27 @@ class Reveal extends StatefulWidget {
 
 class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+  // Made once (not per build, which leaked a listener on every rebuild).
+  late final CurvedAnimation _a = CurvedAnimation(parent: _c, curve: kEase);
+
   @override
   void initState() {
     super.initState();
     Future.delayed(Duration(milliseconds: math.min(widget.i, 12) * 45), () {
-      if (mounted) _c.forward();
+      if (mounted && !_c.isCompleted) _c.forward();
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // "Reduce motion" in the phone's settings: show it in place, no slide-in.
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) _c.value = 1;
+  }
+
+  @override
   void dispose() {
+    _a.dispose();
     _c.dispose();
     super.dispose();
   }
@@ -51,7 +62,7 @@ class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     // Already inside an animating Reveal (e.g. a staggered page): don't double the motion.
     if (context.dependOnInheritedWidgetOfExactType<_RevealScope>() != null) return widget.child;
-    final a = CurvedAnimation(parent: _c, curve: kEase);
+    final a = _a;
     return AnimatedBuilder(
       animation: a,
       builder: (_, child) => Opacity(

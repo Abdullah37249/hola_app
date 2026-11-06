@@ -791,4 +791,7 @@ const Map<String, String> urTeam = {
   'Face ID is off for HOLA. Turn it on in Settings → HOLA → Face ID, or use your password.': 'HOLA کے لیے Face ID بند ہے۔ Settings → HOLA → Face ID میں اسے آن کریں، یا پاس ورڈ استعمال کریں۔',
   'Face ID is locked after too many tries. Lock your iPhone and unlock it with your passcode, then try again.':
       'بہت زیادہ کوششوں کے بعد Face ID بند ہو گیا ہے۔ اپنا iPhone لاک کریں اور پاس کوڈ سے کھولیں، پھر دوبارہ کوشش کریں۔',
+  'Some items are no longer in HOLA’s catalogue. Remove them and try again.': 'کچھ آئٹمز اب HOLA کے کیٹلاگ میں نہیں ہیں۔ انہیں ہٹا کر دوبارہ کوشش کریں۔',
+  'Your profile was changed on another device. Check it and save again.': 'آپ کی پروفائل کسی اور ڈیوائس پر بدلی گئی ہے۔ اسے دیکھ کر دوبارہ محفوظ کریں۔',
+  'Show more ({n} left)': 'مزید دکھائیں ({n} باقی)',
 };
