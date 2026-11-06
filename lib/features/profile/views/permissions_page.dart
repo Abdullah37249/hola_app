@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,7 +24,8 @@ List<(AppPermission, String, String, String)> permissionsFor(Role? role) => [
   ),
   if (role == Role.salesOfficer) (AppPermission.location, 'pin', 'Location', 'Records where you are when you check in at a salon.'),
   if (role == Role.rider) (AppPermission.location, 'pin', 'Location', 'Records where you hand over each delivery.'),
-  if (role == Role.salonOwner) (AppPermission.photos, 'camera', 'Photos & storage', 'Add pictures of your salon from your gallery.'),
+  // Android picks photos through the system photo picker, which needs no permission.
+  if (role == Role.salonOwner && !Platform.isAndroid) (AppPermission.photos, 'camera', 'Photos & storage', 'Add pictures of your salon from your gallery.'),
 ];
 
 /// Lets the person allow (or review) the phone permissions HOLA uses.

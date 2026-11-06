@@ -1,5 +1,6 @@
 // Salon owner + salon staff experiences.
 export 'views/appointment_view.dart' show AppointmentDetailPage;
+export 'views/awaiting_approval_view.dart' show AwaitingApprovalView;
 export 'views/calendar_view.dart' show SalonCalendar;
 export 'views/clients_view.dart' show ClientsPage, ClientHistoryPage;
 export 'views/engagement_view.dart' show ReviewsPage, FeedbackInboxPage;

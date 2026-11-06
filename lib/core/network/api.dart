@@ -437,6 +437,8 @@ DomainError apiToDomain(Object e, {Map<String, String> fieldNames = const {}}) {
     'NETWORK' => DomainError(tr('Can’t reach HOLA. Check your connection and try again.')),
     'TIMEOUT' => DomainError(tr('HOLA is taking too long to answer. Try again.')),
     'INVALID_CREDENTIALS' => DomainError(tr('Email or password is incorrect.'), field: 'password'),
+    // 0.33.0: the account was removed, e.g. a salon sign-up HOLA didn't approve.
+    'ACCOUNT_NOT_FOUND' => DomainError(tr('No account found.'), field: 'email'),
     // 5 wrong passwords in a row: HOLA locks sign-in for 15 minutes.
     'ACCOUNT_LOCKED' || 'LOGIN_LOCKED' => DomainError(tr('Too many failed login attempts. Please try again after 15 minutes.'), field: 'password'),
     'ACCOUNT_SUSPENDED' => DomainError(tr('This account is suspended. Contact HOLA.')),

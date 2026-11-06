@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
@@ -8,6 +9,22 @@ import '../../../shared/widgets/ui.dart';
 import '../../auth/viewmodels/auth_view_models.dart' show strengthHint;
 import '../../auth/widgets/auth_widgets.dart' show PasswordField, StrengthMeter;
 import '../viewmodels/profile_view_models.dart';
+
+/// Where people ask HOLA to close an account the app can't delete itself.
+const kDeletionEmail = 'info@metaxperts.net';
+
+/// Opens an email to HOLA asking to delete the account signed in as [email].
+Future<void> requestAccountDeletion(String email) async {
+  final uri = Uri(
+    scheme: 'mailto',
+    path: kDeletionEmail,
+    query: 'subject=${Uri.encodeComponent('HOLA account deletion request')}&body=${Uri.encodeComponent('Please delete my HOLA account and its data.\nAccount email: $email')}',
+  );
+  try {
+    if (await launchUrl(uri)) return;
+  } catch (_) {}
+  Fx.toast(tr('No email app found. Write to {email}', {'email': kDeletionEmail}), icon: 'alert', tone: 'bad');
+}
 
 class EditProfilePage extends StatelessWidget {
   const EditProfilePage({super.key});
@@ -105,6 +122,14 @@ class _EditProfileState extends State<_EditProfile> {
           Group(
             children: [
               MRow(icon: 'alert', title: tr('Delete account'), sub: tr('Remove your profile and sign out'), titleColor: context.c.badInk, onTap: () => pushPage(context, const DeleteAccountPage())),
+            ],
+          ),
+        ] else ...[
+          // Accounts HOLA manages are closed by HOLA: the person asks by email.
+          const SizedBox(height: 28),
+          Group(
+            children: [
+              MRow(icon: 'alert', title: tr('Request account deletion'), sub: tr('Email HOLA to close your account'), titleColor: context.c.badInk, onTap: () => requestAccountDeletion(a.email)),
             ],
           ),
         ],

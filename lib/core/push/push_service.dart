@@ -59,7 +59,7 @@ class PushService {
       if ('${m.data['type']}' == 'appointment_reminder') showReminderPush(m.data);
       // A booking changed elsewhere: its phone reminders wait for the fresh copy.
       if ('${m.data['type']}' == 'appointment' && '${m.data['id'] ?? ''}'.isNotEmpty) Reminders.instance.cancelFor('${m.data['id']}');
-      pushEvents.add('${m.data['type'] ?? ''}');
+      pushEvents.add(pushEvent(m.data));
       engage.receivePush(title, body, link: link, inboxId: m.data['notificationId'] as String?);
       onForeground?.call(title, body, link);
     });
@@ -72,7 +72,7 @@ class PushService {
 
   void _tapped(RemoteMessage m) {
     final (title, body, link) = _read(m);
-    pushEvents.add('${m.data['type'] ?? ''}');
+    pushEvents.add(pushEvent(m.data));
     engage.receivePush(title, body, link: link, inboxId: m.data['notificationId'] as String?);
     final inboxId = m.data['notificationId'];
     if (inboxId != null && '$inboxId'.isNotEmpty) {
@@ -193,6 +193,15 @@ class PushService {
     final body = m.notification?.body ?? '${d['body'] ?? ''}';
     return (title, body, pushLink(d));
   }
+}
+
+/// What a push means for the app, for [pushEvents] listeners: its `type`,
+/// except HOLA turning down a salon sign-up (0.33.0), which is
+/// `signup_rejected`.
+String pushEvent(Map<String, dynamic> d) {
+  final type = '${d['type'] ?? ''}';
+  if (type == 'account' && '${d['event'] ?? ''}' == 'signup_rejected') return 'signup_rejected';
+  return type;
 }
 
 /// Where a push should open, from its `data` (all strings): `type` is the

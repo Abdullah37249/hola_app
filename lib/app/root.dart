@@ -36,6 +36,8 @@ class _RootState extends State<Root> {
         ? const FingerprintLockView(key: ValueKey('locked'))
         : s.needsSalonSetup
         ? const SalonSetupPage(key: ValueKey('setup'))
+        : s.awaitingApproval
+        ? const AwaitingApprovalView(key: ValueKey('approval'))
         : Shell(key: ValueKey('shell-${s.account!.id}'));
     return Stack(
       children: [

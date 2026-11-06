@@ -84,6 +84,17 @@ abstract interface class AuthRepository implements Observable {
   Future<void> requestPasswordReset(String email);
   Future<void> resetPassword({required String email, required String phone, required String newPassword});
   Future<void> deleteAccount(String password);
+
+  /// A salon owner's salon status (SalonStatus), or null for other accounts.
+  String? get mySalonStatus;
+
+  /// Reads the owner's salon again from HOLA (status and category), e.g. while
+  /// it waits for HOLA's approval.
+  Future<void> refreshMySalon();
+
+  /// HOLA ended this account's sessions (a salon sign-up it didn't approve):
+  /// forget the session on this phone and go back to sign-in.
+  Future<void> endSessionFromHola();
 }
 
 /// Device preferences that survive restarts.

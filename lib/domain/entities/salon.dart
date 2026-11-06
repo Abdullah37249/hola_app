@@ -15,6 +15,10 @@ class Salon {
   String name, phone, about;
   String status;
   String? statusNote; // e.g. what the officer asked to change
+
+  /// HOLA's grade for the salon (A–D), set when HOLA approves it (0.33.0).
+  /// Null before approval and for salons approved before categories existed.
+  String? category;
   final int palette; // artwork colourway
   /// Photo file names on this device; the first is the cover.
   List<String> photos;
@@ -48,6 +52,7 @@ class Salon {
     this.about = '',
     this.status = SalonStatus.pending,
     this.statusNote,
+    this.category,
     required this.palette,
     List<String>? photos,
     this.autoConfirm = false,
@@ -76,6 +81,7 @@ class Salon {
     'about': about,
     'status': status,
     'statusNote': statusNote,
+    if (category != null) 'category': category,
     'palette': palette,
     'photos': photos,
     'autoConfirm': autoConfirm,
@@ -101,6 +107,7 @@ class Salon {
           about: j['about'] ?? '',
           status: j['status'],
           statusNote: j['statusNote'],
+          category: j['category'],
           palette: asInt(j['palette']),
           photos: [for (final p in (j['photos'] as List? ?? const [])) p as String],
           autoConfirm: j['autoConfirm'] ?? false,

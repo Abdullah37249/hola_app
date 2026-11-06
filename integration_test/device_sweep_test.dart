@@ -70,9 +70,9 @@ void main() {
       }
     }
 
-    Future<void> shot(String name) async {
+    Future<void> shot(String name, {int settle = 2500}) async {
       current = name;
-      await wait(2500);
+      await wait(settle);
       collect();
       // Captured inside the app (iOS doesn't deliver integration_test
       // screenshots): the frame as Flutter drew it, at 1x to keep it small.
@@ -86,9 +86,9 @@ void main() {
     // After an account switch the old shell may still be fading out: use the newest.
     BuildContext shell() => tester.element(find.byType(Shell, skipOffstage: false).last);
 
-    Future<void> page(String name, Widget w) async {
+    Future<void> page(String name, Widget w, {int settle = 2500}) async {
       pushPage(shell(), w);
-      await shot(name);
+      await shot(name, settle: settle);
       Navigator.of(shell()).pop();
       await wait(600);
     }
@@ -122,7 +122,8 @@ void main() {
 
     await signIn('m.arslanhaider2001@gmail.com');
     await tabs('10_customer');
-    await page('11_customer_salon', const SalonPage(id: _salon));
+    // Extra time: an earlier sweep caught this page mid-animation with an empty body.
+    await page('11_customer_salon', const SalonPage(id: _salon), settle: 7000);
     await page('12_customer_booking', const BookingDetailPage(id: _booking));
     await page('13_customer_offers', const CustomerOffersPage());
     await page('14_customer_notifications', const NotificationsPage());

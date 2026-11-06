@@ -64,7 +64,15 @@ class _OwnerMore extends StatelessWidget {
                       style: T.sub(context),
                     ),
                     const SizedBox(height: 4),
-                    Wrap(spacing: 6, children: [StatusBadge(s.status), if (r.count > 0) RatingTag(r.average)]),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        StatusBadge(s.status),
+                        // HOLA's grade, set when it approved the salon (0.33.0).
+                        if (s.category case final cat?) ToneBadge(tr('Category {c}', {'c': cat}), tone: 'info'),
+                        if (r.count > 0) RatingTag(r.average),
+                      ],
+                    ),
                   ],
                 ),
               ),

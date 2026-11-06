@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/l10n/l10n.dart';
 import '../../core/mvvm/view_model.dart';
+import '../../core/push/push_events.dart';
 import '../../core/security/biometrics.dart';
 import '../../core/utils/sfx.dart';
 import '../../domain/entities/entities.dart';
@@ -24,9 +27,20 @@ class SessionViewModel extends ViewModel {
           locked = true;
           notify();
         }
+        // Back in the app while HOLA reviews the salon: maybe it's decided.
+        if (awaitingApproval) checkApproval().catchError((Object _) {});
       },
     );
+    _pushes = pushEvents.stream.listen((kind) {
+      if (kind == 'signup_rejected') {
+        _auth.endSessionFromHola();
+      } else if (kind == 'salon' && account?.role == Role.salonOwner) {
+        checkApproval().catchError((Object _) {});
+      }
+    });
   }
+
+  StreamSubscription<String>? _pushes;
 
   /// Time in the background after which fingerprint sign-in locks HOLA again.
   static const relockAfter = Duration(minutes: 5);
@@ -60,6 +74,8 @@ class SessionViewModel extends ViewModel {
       });
     }
     ready = true;
+    // Opened while HOLA reviews the salon: ask whether it's decided.
+    if (awaitingApproval) checkApproval().catchError((Object _) {});
     notify();
   }
 
@@ -168,6 +184,26 @@ class SessionViewModel extends ViewModel {
     _ => 'customer',
   };
 
+  /// A new salon owner's salon waits for HOLA to approve it (0.33.0): until
+  /// then the app shows only that, since HOLA refuses every salon action.
+  bool get awaitingApproval => account?.role == Role.salonOwner && _auth.usesServer && _auth.mySalonStatus == SalonStatus.pending;
+
+  bool checking = false;
+
+  /// Asks HOLA again whether the salon was approved. Throws a [DomainError]
+  /// when HOLA can't be reached.
+  Future<void> checkApproval() async {
+    if (checking) return;
+    checking = true;
+    notify();
+    try {
+      await _auth.refreshMySalon();
+    } finally {
+      checking = false;
+      notify();
+    }
+  }
+
   /// A salon owner who hasn't created their salon yet goes through set-up first.
   bool get needsSalonSetup => account?.role == Role.salonOwner && account?.salonId == null;
 
@@ -213,6 +249,7 @@ class SessionViewModel extends ViewModel {
   @override
   void dispose() {
     _life?.dispose();
+    _pushes?.cancel();
     _auth.changes.removeListener(_onData);
     super.dispose();
   }

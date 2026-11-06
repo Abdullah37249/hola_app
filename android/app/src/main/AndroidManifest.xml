@@ -8,9 +8,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Booking reminders scheduled on the phone come back after a restart. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <!-- Salon photos from the gallery: Android 13+ and older versions. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <!-- Photos come from the system photo picker, which needs no storage or media permission. -->
     <!-- Saving certificates on Android 9 and older (newer versions need no permission). -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
     <application
@@ -81,6 +79,11 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="google.navigation"/>
+        </intent>
+        <!-- Account deletion requests by email -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="mailto"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.DIAL"/>

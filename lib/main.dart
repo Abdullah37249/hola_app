@@ -169,7 +169,7 @@ class _HolaAppState extends State<HolaApp> {
     final push = _push;
     final link = push?.opened.value;
     final session = context.read<SessionViewModel>();
-    if (push == null || link == null || !session.ready || !session.signedIn || session.needsSalonSetup) return;
+    if (push == null || link == null || !session.ready || !session.signedIn || session.needsSalonSetup || session.awaitingApproval) return;
     push.opened.value = null;
     // Fresh data for the screen the push points at.
     try {

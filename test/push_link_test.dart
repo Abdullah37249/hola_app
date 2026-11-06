@@ -14,4 +14,11 @@ void main() {
     expect(pushLink({'type': 'order'}), isNull); // needs an id
     expect(pushLink({}), isNull);
   });
+
+  test('a turned-down salon sign-up is its own push event (0.33.0)', () {
+    expect(pushEvent({'type': 'account', 'event': 'signup_rejected', 'category': 'ACCOUNT'}), 'signup_rejected');
+    expect(pushEvent({'type': 'account'}), 'account');
+    expect(pushEvent({'type': 'salon', 'id': 's-1'}), 'salon');
+    expect(pushEvent({}), '');
+  });
 }

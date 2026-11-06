@@ -53,6 +53,13 @@ class FakeHola {
 
   Map? registeredSalon;
 
+  /// The owner's salon as /me/salons has it (0.33.0: new salons wait for HOLA).
+  String salonStatus = 'ACTIVE';
+  String? salonCategory;
+
+  /// Accounts HOLA removed (a salon sign-up it turned down).
+  final removed = <String>{};
+
   final salonJson = {
     'id': 'salon-1',
     'name': 'Shape Salon',
@@ -109,6 +116,7 @@ class FakeHola {
     bodies['${req.method} $path'] = body;
     switch ('${req.method} $path') {
       case 'POST /auth/login':
+        if (removed.contains(body['email'])) return json({'type': 'urn:hola:problem', 'status': 404, 'code': 'ACCOUNT_NOT_FOUND', 'detail': 'No account found.'}, 404);
         final u = users[body['email']];
         if (u == null || u.$1 != body['password']) return problem(401, 'INVALID_CREDENTIALS');
         signedIn = body['email'];
@@ -345,7 +353,7 @@ class FakeHola {
       case 'GET /me/salons':
         return json([
           {
-            'salon': {'id': 'salon-1', 'code': 'HS-000001', 'name': 'Shape Salon', 'status': 'ACTIVE', 'city': 'Lahore', 'phone': '+92 300 1234567'},
+            'salon': {'id': 'salon-1', 'code': 'HS-000001', 'name': 'Shape Salon', 'status': salonStatus, 'category': salonCategory, 'city': 'Lahore', 'phone': '+92 300 1234567'},
             'role': 'SALON_OWNER',
             'branchIds': [],
             'permissions': [],
@@ -547,6 +555,53 @@ void main() {
       auth.signUp(role: Role.salonOwner, name: 'Rabia', email: 'r@x.pk', phone: '0300 1112233', password: pw, city: 'Lahore'),
       throwsA(isA<DomainError>().having((e) => e.field, 'field', 'salonName')),
     );
+  });
+
+  test('a new salon waits for HOLA approval, then shows its category', () async {
+    hola.salonStatus = 'PENDING_VERIFICATION';
+    await auth.signUp(
+      role: Role.salonOwner,
+      name: 'Noor Fatima',
+      email: 'noor@salon.pk',
+      phone: '0300 1112233',
+      password: pw,
+      city: 'Lahore',
+      salon: const SalonDraft(name: 'Shape Salon', address: '12 Main Blvd', area: 'Gulberg'),
+    );
+    expect(auth.mySalonStatus, SalonStatus.pending);
+    // Not in the directory yet: nothing asked of the salon endpoints.
+    expect(hola.calls, isNot(contains('GET /discover/salons/salon-1')));
+    // Still waiting: asking again changes nothing.
+    await auth.refreshMySalon();
+    expect(auth.mySalonStatus, SalonStatus.pending);
+    // HOLA approves it as a Category B salon.
+    hola
+      ..salonStatus = 'ACTIVE'
+      ..salonCategory = 'B';
+    await auth.refreshMySalon();
+    expect(auth.mySalonStatus, SalonStatus.active);
+    expect(salons.salon('salon-1')!.category, 'B');
+  });
+
+  test('a turned-down salon sign-up signs out, and its email has no account', () async {
+    hola.salonStatus = 'PENDING_VERIFICATION';
+    await auth.signUp(
+      role: Role.salonOwner,
+      name: 'Noor Fatima',
+      email: 'noor@salon.pk',
+      phone: '0300 1112233',
+      password: pw,
+      city: 'Lahore',
+      salon: const SalonDraft(name: 'Shape Salon', address: '12 Main Blvd', area: 'Gulberg'),
+    );
+    // The signup_rejected push: HOLA ended the sessions and removed the account.
+    hola.removed.add('noor@salon.pk');
+    final before = hola.calls.length;
+    await auth.endSessionFromHola();
+    expect(auth.current, isNull);
+    expect(hola.calls.skip(before), isNot(contains('POST /auth/logout')));
+    expect(db.salons, isEmpty);
+    await expectLater(auth.signIn('noor@salon.pk', pw), throwsA(isA<DomainError>().having((e) => e.message, 'message', 'No account found.')));
   });
 
   test('a customer books a HOLA salon on the server, sees it, and cancels it', () async {

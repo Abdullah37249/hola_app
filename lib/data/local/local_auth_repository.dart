@@ -338,7 +338,12 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
     final status = switch (s['status']) {
       'ACTIVE' => SalonStatus.active,
       'SUSPENDED' => SalonStatus.suspended,
+      'CHANGES_REQUESTED' => SalonStatus.changes,
       _ => SalonStatus.pending,
+    };
+    final category = switch (s['category']) {
+      final String c when RegExp(r'^[A-Z]$').hasMatch(c) => c,
+      _ => null,
     };
     if (status == SalonStatus.active) {
       try {
@@ -353,7 +358,8 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
     salon
       ..name = s['name'] as String? ?? salon.name
       ..phone = s['phone'] as String? ?? salon.phone
-      ..status = status;
+      ..status = status
+      ..category = category;
     if (salon.ownerId != ownerId) {
       final i = db.salons.indexOf(salon);
       db.salons[i] = Salon.fromJson({...salon.toJson(), 'ownerId': ownerId});
@@ -377,6 +383,38 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
       db.staff.add(StaffProfile(accountId: ownerId, salonId: id, title: 'Owner', week: [...?b?.hours], createdAt: now()));
     }
     return id;
+  }
+
+  @override
+  String? get mySalonStatus {
+    final a = me;
+    if (a == null || a.role != Role.salonOwner || a.salonId == null) return null;
+    return db.salons.where((x) => x.id == a.salonId).firstOrNull?.status;
+  }
+
+  @override
+  Future<void> refreshMySalon() async {
+    final a = me;
+    if (api == null || a == null || a.role != Role.salonOwner) return;
+    try {
+      final id = await _mirrorMySalon(a.id);
+      if (id != null) a.salonId = id;
+    } on ApiError catch (e) {
+      if (e.status == 401) return; // the session ended: HolaApi signs out
+      throw apiToDomain(e);
+    }
+    db.commit();
+  }
+
+  @override
+  Future<void> endSessionFromHola() async {
+    final id = me?.id;
+    if (api == null || id == null) return;
+    // The server already ended every session: no logout call, and no kept
+    // fingerprint session to come back to.
+    if (_parked.remove(id)) await api!.forgetParked(id);
+    await api!.clearSession();
+    await db.wipeAccountData();
   }
 
   /// Creates a sales officer or rider account without signing in. Stands in

@@ -39,7 +39,11 @@ class _OwnerToday extends StatelessWidget {
       // Pull to refresh: the bookings, and HOLA's offers and products below them.
       onRefresh: () {
         final trade = context.read<TradeRepository>();
-        return Future.wait([context.read<BookingRepository>().sync(), trade.syncCoupons(s.id).catchError((Object _) {}), trade.syncCatalogue().catchError((Object _) {})]);
+        return Future.wait([
+          context.read<BookingRepository>().sync(), trade.syncCoupons(s.id).catchError((Object _) {}), trade.syncCatalogue().catchError((Object _) {}),
+          // Status and HOLA category, as HOLA has them now.
+          context.read<AuthRepository>().refreshMySalon().catchError((Object _) {}),
+        ]);
       },
       children: [
         ...staggered([

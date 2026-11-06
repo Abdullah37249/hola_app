@@ -311,6 +311,7 @@ void main() {
     await page('29_owner_certificate', CertificatePage(trainingId: ids.pastTraining, personId: ids.ayesha));
     await page('29_owner_member', MemberPage(id: ids.ayesha));
     await page('29_owner_permissions', const PermissionsPage());
+    await page('29_owner_awaiting_approval', const AwaitingApprovalView());
 
     await signIn('officer@t.pk');
     await tabs('40_officer');
