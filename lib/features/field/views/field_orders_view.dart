@@ -147,22 +147,24 @@ class _HandoverRow extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        HButton(
-          tr('Confirm'),
-          small: true,
-          kind: BtnKind.ok,
-          onTap: () async {
-            if (await confirmSheet(
-              context,
-              title: tr('Confirm {amount} received?', {'amount': rs(h.amount)}),
-              body: tr('Only confirm once you have counted the cash from {name}.', {'name': vm.personName(h.riderId)}),
-              confirm: tr('Cash received'),
-            )) {
-              await attempt(() => vm.confirmHandover(h.id), success: tr('Cash confirmed'), icon: 'cash');
-            }
-          },
-        ),
+        if (vm.canConfirmCash) ...[
+          const SizedBox(width: 8),
+          HButton(
+            tr('Confirm'),
+            small: true,
+            kind: BtnKind.ok,
+            onTap: () async {
+              if (await confirmSheet(
+                context,
+                title: tr('Confirm {amount} received?', {'amount': rs(h.amount)}),
+                body: tr('Only confirm once you have counted the cash from {name}.', {'name': vm.personName(h.riderId)}),
+                confirm: tr('Cash received'),
+              )) {
+                await attempt(() => vm.confirmHandover(h.id), success: tr('Cash confirmed'), icon: 'cash');
+              }
+            },
+          ),
+        ],
       ],
     ),
   );

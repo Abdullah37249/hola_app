@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -14,8 +16,14 @@ import '../widgets/auth_widgets.dart';
 String? fingerprintProblem(BioResult r) => switch (r) {
   BioResult.ok || BioResult.cancelled => null,
   BioResult.failed => bio(tr('Fingerprint not recognised. Try again, or use your password.')),
-  BioResult.lockedOut => bio(tr('Too many tries. Use your password, or try your fingerprint again later.')),
-  BioResult.unavailable => bio(tr('No fingerprint is set up on this phone. Add one in the phone’s Settings, or use your password.')),
+  BioResult.lockedOut =>
+    Platform.isIOS
+        ? bio(tr('Face ID is locked after too many tries. Lock your iPhone and unlock it with your passcode, then try again.'))
+        : tr('Too many tries. Use your password, or try your fingerprint again later.'),
+  BioResult.unavailable =>
+    Platform.isIOS
+        ? bio(tr('Face ID is off for HOLA. Turn it on in Settings → HOLA → Face ID, or use your password.'))
+        : tr('No fingerprint is set up on this phone. Add one in the phone’s Settings, or use your password.'),
 };
 
 /// The big round fingerprint button.

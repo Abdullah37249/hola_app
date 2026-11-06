@@ -13,6 +13,28 @@ import 'storage.dart';
 class LocalDatabase extends ChangeNotifier {
   LocalDatabase(this._storage);
   final Storage _storage;
+
+  final _onWipe = <void Function()>[];
+
+  /// [f] clears a repository's in-memory copies when [wipeAccountData] runs.
+  void onWipe(void Function() f) => _onWipe.add(f);
+
+  /// Forgets everything that belongs to the signed-in account and the people
+  /// and salons it saw: salons, bookings, orders, money, chats, notifications
+  /// and in-memory copies. Device settings (theme, language, sound) stay, and
+  /// so does fingerprint/Face ID sign-in (kept in secure storage). The next
+  /// account on this phone starts clean and syncs its own data from HOLA.
+  Future<void> wipeAccountData() async {
+    for (final l in <List<Object>>[accounts, staff, leave, salons, branches, services, offers, appointments, reviews, complaints, threads, messages, notifications, products, orders, credit, returns, productReviews, handovers, visits, trainings, reports]) {
+      l.clear();
+    }
+    sessionAccountId = null;
+    for (final f in _onWipe) {
+      f();
+    }
+    commit();
+    await flush();
+  }
   static const _version = 1;
 
   final accounts = <Account>[];

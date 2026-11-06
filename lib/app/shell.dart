@@ -8,6 +8,7 @@ import 'package:hola_professional/core/utils/sfx.dart';
 import 'viewmodels/session_view_model.dart';
 import 'package:hola_professional/shared/widgets/ui.dart';
 import 'tabs.dart';
+import '../core/utils/foreground.dart';
 import '../core/push/push_events.dart';
 import '../domain/entities/entities.dart';
 import '../domain/repositories/repositories.dart';
@@ -122,7 +123,10 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     _lastNotice = _engage.notifications().firstOrNull?.id ?? '';
     _who = context.read<SessionViewModel>().account?.id;
     _engage.changes.addListener(_onData);
-    _poll = Timer.periodic(const Duration(seconds: 20), (_) => _sync());
+    // Not while the app is in the background: push and the resume refresh cover it.
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (appInForeground) _sync();
+    });
     _pushes = pushEvents.stream.listen((kind) {
       // A push type the app doesn't know yet refreshes everything.
       const known = {

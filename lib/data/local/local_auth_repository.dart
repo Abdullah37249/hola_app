@@ -55,10 +55,9 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
   /// account is mirrored here for the screens. Without it (tests), accounts
   /// live on the device only.
   LocalAuthRepository(super.db, {this.api, FingerprintStore? fingerprints}) : _fpStore = fingerprints ?? (api == null ? MemoryFingerprintStore() : SecureFingerprintStore()) {
-    api?.onSessionEnded = () {
-      db.sessionAccountId = null;
-      db.commit();
-    };
+    // The session ended on the server (refresh refused): nothing of that
+    // account stays on the phone.
+    api?.onSessionEnded = () => db.wipeAccountData();
   }
   final HolaApi? api;
 
@@ -416,6 +415,10 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
     } else {
       await api?.logout();
     }
+    // With HOLA, the phone keeps nothing of this account (customers' names
+    // and phones, bookings, orders, money, chats): the next account on this
+    // phone starts clean. On-device mode keeps its local accounts.
+    if (api != null) return db.wipeAccountData();
     db.sessionAccountId = null;
     db.commit();
     await db.flush();
@@ -494,10 +497,7 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
         throw apiToDomain(e);
       }
       await api!.clearSession();
-      db.accounts.remove(a);
-      db.notifications.removeWhere((n) => n.userId == a.id);
-      db.sessionAccountId = null;
-      db.commit();
+      await db.wipeAccountData();
       return;
     }
     if (hashPassword(password, a.salt) != a.passwordHash) throw DomainError(tr('Password is incorrect.'), field: 'password');

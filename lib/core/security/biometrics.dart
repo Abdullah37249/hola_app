@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:local_auth/local_auth.dart';
 
 /// iPhone with Face ID (true) or Touch ID (false); unknown until [Biometrics.available] runs.
@@ -53,18 +54,28 @@ class Biometrics {
       return await (() async {
         final types = await _auth.getAvailableBiometrics();
         if (Platform.isIOS) _iosFace = types.contains(BiometricType.face) || !types.contains(BiometricType.fingerprint);
-        return await _auth.isDeviceSupported() && await _auth.canCheckBiometrics && types.isNotEmpty;
+        final supported = await _auth.isDeviceSupported(), can = await _auth.canCheckBiometrics;
+        // iPhone: Face ID switched off for HOLA (the person said "Don't Allow")
+        // still offers the option; trying it then says how to switch it on.
+        if (Platform.isIOS) return supported;
+        return supported && can && types.isNotEmpty;
       })().timeout(const Duration(seconds: 2), onTimeout: () => false);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Biometrics: available() failed: $e');
       return false; // no plugin (tests) or no hardware
     }
   }
 
   Future<BioResult> verify(String reason) async {
     try {
-      return await _auth.authenticate(localizedReason: reason, biometricOnly: true, persistAcrossBackgrounding: true) ? BioResult.ok : BioResult.failed;
+      // iPhone: Face ID, falling back to the iPhone passcode as iOS does (that
+      // also clears a Face ID lockout). Android: fingerprint only.
+      return await _auth.authenticate(localizedReason: reason, biometricOnly: !Platform.isIOS, persistAcrossBackgrounding: true) ? BioResult.ok : BioResult.failed;
     } on LocalAuthException catch (e) {
+      debugPrint('Biometrics: ${e.code.name} ${e.description ?? ''}');
       return switch (e.code) {
+        // "Enter Password" on the prompt: they chose not to use it now.
+        LocalAuthExceptionCode.userRequestedFallback ||
         LocalAuthExceptionCode.userCanceled ||
         LocalAuthExceptionCode.systemCanceled ||
         LocalAuthExceptionCode.timeout ||
@@ -77,7 +88,8 @@ class Biometrics {
         LocalAuthExceptionCode.biometricHardwareTemporarilyUnavailable => BioResult.unavailable,
         _ => BioResult.failed,
       };
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Biometrics: $e');
       return BioResult.failed;
     }
   }

@@ -10,7 +10,9 @@ import 'hola_mirror.dart' show mirrorPerson;
 import 'local_auth_repository.dart';
 
 class LocalFieldRepository extends LocalRepository implements FieldRepository {
-  LocalFieldRepository(super.db, {this.api});
+  LocalFieldRepository(super.db, {this.api}) {
+    db.onWipe(_userOfMember.clear);
+  }
 
   /// HOLA server (training, contract 0.12.0); null keeps everything on the device.
   final HolaApi? api;
@@ -138,12 +140,7 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
     final same = list.where((p) => p['active'] != false && p['isActive'] != false && '${p['title']}'.trim().toLowerCase() == title.trim().toLowerCase()).firstOrNull;
     if (same != null) return '${same['id']}';
     final p =
-        await api!.post(
-              '/training/programmes',
-              {'title': title.trim(), if (description.trim().isNotEmpty) 'description': description.trim(), 'durationMin': durationMin, 'certifies': true},
-              headers: {'Idempotency-Key': db.newId() + db.newId()},
-            )
-            as J;
+        await api!.post('/training/programmes', {'title': title.trim(), if (description.trim().isNotEmpty) 'description': description.trim(), 'durationMin': durationMin, 'certifies': true}) as J;
     return '${p['id']}';
   }
 
@@ -155,8 +152,6 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
     if (mine == null) throw DomainError(tr('Only HOLA trainers can run sessions. Ask HOLA to give you the Trainer role.'));
     return '${mine['id']}';
   }
-
-  Map<String, String> get _key => {'Idempotency-Key': db.newId() + db.newId()};
 
   Visit _visit(String id) {
     final v = visit(id) ?? (throw DomainError(tr('Visit not found.')));
@@ -277,7 +272,7 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
                     'city': ?city,
                     'capacity': seats,
                     if (description.trim().isNotEmpty) 'notes': description.trim(),
-                  }, headers: _key)
+                  })
                   as J;
         }
         final t = _mirrorSession(res);
@@ -341,7 +336,7 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
     if (t.status != 'SCHEDULED') throw DomainError(tr('This session is already closed.'));
     if (t.onServer && api != null) {
       try {
-        _mirrorSession(await api!.post('/training/sessions/$id/cancel', {'version': t.version}, headers: _key) as J);
+        _mirrorSession(await api!.post('/training/sessions/$id/cancel', {'version': t.version}) as J);
         db.commit();
       } catch (e) {
         throw _trainingError(e);
@@ -377,7 +372,7 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
         await api!.post('/training/sessions/${t.id}/enrol', {
           'salonId': requireMe.salonId,
           'userIds': [_userOf(p.id)],
-        }, headers: _key);
+        });
         await _reload(t.id);
       } catch (e) {
         throw _trainingError(e);
@@ -406,7 +401,7 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
       final eid = t.enrolmentOf[p.id];
       if (eid == null) return;
       try {
-        await api!.post('/training/enrolments/$eid/cancel', const {}, headers: _key);
+        await api!.post('/training/enrolments/$eid/cancel', const {});
         await _reload(t.id);
       } catch (e) {
         throw _trainingError(e);
@@ -427,9 +422,9 @@ class LocalFieldRepository extends LocalRepository implements FieldRepository {
         final items = [
           for (final MapEntry(key: pid, value: eid) in t.enrolmentOf.entries) {'enrolmentId': eid, 'attended': attendedIds.contains(pid)},
         ];
-        if (items.isNotEmpty) await api!.post('/training/sessions/$id/attendance', {'items': items}, headers: _key);
+        if (items.isNotEmpty) await api!.post('/training/sessions/$id/attendance', {'items': items});
         final fresh = await api!.get('/training/sessions/$id') as J;
-        _mirrorSession(await api!.post('/training/sessions/$id/complete', {'version': _n(fresh['version'], t.version)}, headers: _key) as J);
+        _mirrorSession(await api!.post('/training/sessions/$id/complete', {'version': _n(fresh['version'], t.version)}) as J);
         await _reload(id);
       } catch (e) {
         throw _trainingError(e);

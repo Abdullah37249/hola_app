@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -142,6 +143,8 @@ class HolaApi {
 
   Future<void> clearSession() async {
     _tokens = null;
+    _retryKeys.clear();
+    _uploads.clear();
     _loaded = true;
     await _store.clear();
   }
@@ -268,11 +271,21 @@ class HolaApi {
   /// Uploads a file in HOLA's two steps (declare it, then send the bytes)
   /// and returns its id.
   Future<String> uploadFile(List<int> bytes, {required String contentType, required String purpose, String? fileName}) async {
+    // The same photo again soon (a retry after a timeout): reuse its file, so
+    // the retried request is identical and HOLA replays it (see _retryKeys).
+    final sig = '$purpose|${bytes.length}|${Object.hashAll([for (var i = 0; i < bytes.length; i += 997) bytes[i]])}';
+    final now = DateTime.now();
+    _uploads.removeWhere((_, v) => now.difference(v.$2) > const Duration(minutes: 30));
+    if (_uploads[sig] case final done?) return done.$1;
     final f = await post('/files', {'purpose': purpose, 'contentType': contentType, 'sizeBytes': bytes.length, 'fileName': ?fileName}) as J;
     final id = f['id'] as String;
     await _authed('PUT', '/files/$id/content', _Bytes(bytes, contentType), true);
+    _uploads[sig] = (id, now);
     return id;
   }
+
+  /// Photos uploaded in the last 30 minutes: signature → (file id, when).
+  final _uploads = <String, (String, DateTime)>{};
 
   /// Raw bytes of a file (e.g. GET /files/{id}/content), signed in.
   Future<List<int>> bytes(String path) async {
@@ -296,8 +309,44 @@ class HolaApi {
 
   Future<dynamic> delete(String path) => _authed('DELETE', path, null, true);
 
+  /// Idempotency keys of writes that didn't get a definite answer (timeout,
+  /// no connection, server error), by request: a retry of the same request
+  /// sends the same key, so HOLA replays the first result instead of placing
+  /// a second order, payment, handover, booking or return. HOLA accepts the
+  /// key on every authenticated write (contract 0.31.0).
+  final _retryKeys = <String, (String, DateTime)>{};
+  static final _rng = Random.secure();
+
+  String _keyFor(String request) {
+    final now = DateTime.now();
+    _retryKeys.removeWhere((_, v) => now.difference(v.$2) > const Duration(minutes: 30));
+    final k = _retryKeys[request];
+    if (k != null) return k.$1;
+    final fresh = List.generate(32, (_) => _rng.nextInt(16).toRadixString(16)).join();
+    _retryKeys[request] = (fresh, now);
+    return fresh;
+  }
+
   Future<dynamic> _authed(String method, String path, Object? body, bool auth, [Map<String, String>? query, Map<String, String>? headers]) async {
     if (!auth) return _send(method, path, body, query: query, auth: false, headers: headers);
+    // Every write carries a key that stays the same across retries.
+    String? request;
+    if (method != 'GET' && body is! _Bytes) {
+      request = '$method $path ${jsonEncode(body)}';
+      headers = {...?headers, 'Idempotency-Key': _keyFor(request)};
+    }
+    try {
+      final res = await _authedSend(method, path, body, query, headers);
+      if (request != null) _retryKeys.remove(request);
+      return res;
+    } on ApiError catch (e) {
+      // A definite answer (accepted elsewhere or refused): a later request is new.
+      if (request != null && e.status != 0 && e.status < 500) _retryKeys.remove(request);
+      rethrow;
+    }
+  }
+
+  Future<dynamic> _authedSend(String method, String path, Object? body, Map<String, String>? query, Map<String, String>? headers) async {
     final t = await _current();
     if (t == null) throw const ApiError(401, 'UNAUTHENTICATED', 'Not signed in');
     // Renew a little before expiry so requests don't fail mid-flight.

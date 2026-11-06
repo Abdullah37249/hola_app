@@ -481,6 +481,11 @@ class CartLine {
 }
 
 abstract interface class TradeRepository implements Observable {
+  /// Officers may approve, dispatch, record payments, set credit terms,
+  /// confirm cash and edit products on the phone (on-device mode only).
+  /// With HOLA connected these happen in the HOLA dashboard.
+  bool get officerToolsOnPhone;
+
   /// Refreshes HOLA's trade catalogue from the server (no-op on-device only).
   Future<void> syncCatalogue();
   List<Product> products({bool activeOnly = true});

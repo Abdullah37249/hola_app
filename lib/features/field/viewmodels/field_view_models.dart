@@ -213,6 +213,9 @@ class FieldOrdersViewModel extends RepoViewModel with FieldLookups {
   final AuthRepository auth;
   final TradeRepository trade;
 
+  /// Confirming a rider's cash: on-device only (Cash in the HOLA dashboard otherwise).
+  bool get canConfirmCash => trade.officerToolsOnPhone;
+
   static List<(String, String)> get filters => [
     ('approve', tr('Needs approval')),
     ('dispatch', tr('To dispatch')),

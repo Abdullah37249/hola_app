@@ -35,8 +35,9 @@ class OrderDetailViewModel extends RepoViewModel {
       {OrderStatus.dispatched, OrderStatus.outForDelivery, OrderStatus.delivered, OrderStatus.failed, OrderStatus.confirmed}.contains(status);
   bool get canOwnerCancel => isOwner && {OrderStatus.placed, OrderStatus.underReview}.contains(status);
   bool get canConfirmReceipt => isOwner && status == OrderStatus.delivered;
-  bool get canApprove => isOfficer && {OrderStatus.placed, OrderStatus.underReview}.contains(status);
-  bool get canDispatch => isOfficer && {OrderStatus.approved, OrderStatus.failed}.contains(status);
+  // With HOLA connected, approving and dispatching happen in the HOLA dashboard.
+  bool get canApprove => isOfficer && trade.officerToolsOnPhone && {OrderStatus.placed, OrderStatus.underReview}.contains(status);
+  bool get canDispatch => isOfficer && trade.officerToolsOnPhone && {OrderStatus.approved, OrderStatus.failed}.contains(status);
   bool get canOfficerCancel => isOfficer && {OrderStatus.placed, OrderStatus.underReview, OrderStatus.approved, OrderStatus.dispatched, OrderStatus.failed}.contains(status);
 
   /// The salon can send products from this delivered order back.
@@ -307,6 +308,9 @@ class StatementViewModel extends RepoViewModel {
   CreditSummary get credit => trade.credit(salonId);
   bool get isOfficer => auth.current?.role == Role.salesOfficer;
 
+  /// Credit terms and recording payments: on-device only (HOLA dashboard otherwise).
+  bool get canManage => isOfficer && trade.officerToolsOnPhone;
+
   /// Newest first, each with the running balance after it.
   List<LedgerRow> get ledger {
     final oldest = trade.statement(salonId).reversed;
@@ -327,6 +331,10 @@ class ProductsAdminViewModel extends RepoViewModel {
   ProductsAdminViewModel(this.trade) : super(trade);
   final TradeRepository trade;
   static const lowStock = 10;
+
+  /// Adding, editing and restocking products: on-device only. With HOLA
+  /// connected the list is read-only (Products and Inventory in the dashboard).
+  bool get canEdit => trade.officerToolsOnPhone;
 
   String? category;
   List<Product> get all => trade.products(activeOnly: false);

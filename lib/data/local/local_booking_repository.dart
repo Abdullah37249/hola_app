@@ -14,7 +14,15 @@ import '../../core/network/api.dart';
 import '../../domain/entities/json.dart' show asInt;
 
 class LocalBookingRepository extends LocalRepository implements BookingRepository {
-  LocalBookingRepository(super.db, {this.api});
+  LocalBookingRepository(super.db, {this.api}) {
+    db.onWipe(() {
+      _slots.clear();
+      _repaired.clear();
+      _synced.clear();
+      _seen.clear();
+      _clients.clear();
+    });
+  }
 
   /// When set, bookings at HOLA salons go through the HOLA server.
   final HolaApi? api;
@@ -302,14 +310,16 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   Future<Appointment> book({required String salonId, required String branchId, required List<String> serviceIds, String? staffId, required DateTime start, String notes = ''}) async {
     requireRole({Role.customer});
     if (_isHola(salonId)) {
-      // HOLA applies each service's best offer itself (contract 0.20.0).
-      final key = DateTime.now().microsecondsSinceEpoch.toRadixString(36) + db.newId(); // one booking even if the request is retried
+      // HOLA applies each service's best offer itself (contract 0.20.0). A retry
+      // of the same request reuses its idempotency key (HolaApi), so one booking.
       return _remote(
-        () => api!.post(
-          '/appointments',
-          {'branchId': branchId, 'serviceIds': serviceIds, 'staffId': ?staffId, 'startsAt': start.toUtc().toIso8601String(), if (notes.trim().isNotEmpty) 'notes': notes.trim()},
-          headers: {'Idempotency-Key': key},
-        ),
+        () => api!.post('/appointments', {
+          'branchId': branchId,
+          'serviceIds': serviceIds,
+          'staffId': ?staffId,
+          'startsAt': start.toUtc().toIso8601String(),
+          if (notes.trim().isNotEmpty) 'notes': notes.trim(),
+        }),
         codes: _slotCodes,
       );
     }
@@ -388,19 +398,14 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     // HOLA salons: the walk-in goes on HOLA's calendar, so the slot is taken
     // for online bookings too (contract 0.18.1: starts CONFIRMED).
     if (_isHola(salonId)) {
-      final key = DateTime.now().microsecondsSinceEpoch.toRadixString(36) + db.newId();
       return _remote(
-        () => api!.post(
-          '/salons/$salonId/appointments',
-          {
-            'branchId': branchId,
-            'serviceIds': serviceIds,
-            if (staffId.isNotEmpty) 'staffId': staffId,
-            'startsAt': start.toUtc().toIso8601String(),
-            'guest': {'fullName': guestName.trim(), if (guestPhone.trim().isNotEmpty) 'phone': guestPhone.trim()},
-          },
-          headers: {'Idempotency-Key': key},
-        ),
+        () => api!.post('/salons/$salonId/appointments', {
+          'branchId': branchId,
+          'serviceIds': serviceIds,
+          if (staffId.isNotEmpty) 'staffId': staffId,
+          'startsAt': start.toUtc().toIso8601String(),
+          'guest': {'fullName': guestName.trim(), if (guestPhone.trim().isNotEmpty) 'phone': guestPhone.trim()},
+        }),
         codes: {
           ..._slotCodes,
           'APPOINTMENT_SLOT_UNAVAILABLE': tr('That professional isn’t free then (opening hours, shift or time off). Pick another time or professional.'),

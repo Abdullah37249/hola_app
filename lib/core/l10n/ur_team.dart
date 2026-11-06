@@ -788,4 +788,7 @@ const Map<String, String> urTeam = {
   'Size {size}': 'سائز {size}',
   'Minimum order': 'کم از کم آرڈر',
   'When your service starts': 'جب آپ کی سروس شروع ہو',
+  'Face ID is off for HOLA. Turn it on in Settings → HOLA → Face ID, or use your password.': 'HOLA کے لیے Face ID بند ہے۔ Settings → HOLA → Face ID میں اسے آن کریں، یا پاس ورڈ استعمال کریں۔',
+  'Face ID is locked after too many tries. Lock your iPhone and unlock it with your passcode, then try again.':
+      'بہت زیادہ کوششوں کے بعد Face ID بند ہو گیا ہے۔ اپنا iPhone لاک کریں اور پاس کوڈ سے کھولیں، پھر دوبارہ کوشش کریں۔',
 };

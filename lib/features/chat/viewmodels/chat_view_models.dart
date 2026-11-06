@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../../../core/utils/foreground.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/mvvm/repo_view_model.dart';
 import '../../../core/push/push_events.dart';
@@ -87,8 +88,11 @@ class ChatViewModel extends RepoViewModel {
     _markRead();
     if (chat.live) {
       chat.syncThread(threadId).catchError((Object _) {});
-      _poll = Timer.periodic(const Duration(seconds: 3), (_) => chat.syncThread(threadId).catchError((Object _) {}));
-      _pushes = pushEvents.stream.listen((_) => chat.syncThread(threadId).catchError((Object _) {}));
+      // Every 5 s while on screen (never in the background), and on a chat push.
+      _poll = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (appInForeground) chat.syncThread(threadId).catchError((Object _) {});
+      });
+      _pushes = pushEvents.stream.where((k) => k == 'chat_message' || k == 'message').listen((_) => chat.syncThread(threadId).catchError((Object _) {}));
     }
     openThreadId = threadId;
   }
@@ -138,7 +142,9 @@ class InboxViewModel extends RepoViewModel {
   InboxViewModel(this.chat, this._salons) : super(chat) {
     if (chat.live) {
       pull().catchError((Object _) {});
-      _poll = Timer.periodic(const Duration(seconds: 10), (_) => chat.sync().catchError((Object _) {}));
+      _poll = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (appInForeground) chat.sync().catchError((Object _) {});
+      });
     }
   }
   final ChatRepository chat;

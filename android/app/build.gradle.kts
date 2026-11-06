@@ -1,3 +1,13 @@
+import java.util.Properties
+
+// Release signing: android/key.properties (never committed, see android/.gitignore)
+// names the upload keystore. Without it, release builds fall back to the debug
+// key so `flutter run --release` still works on test phones.
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
@@ -32,11 +42,20 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (keystoreProperties.containsKey("storeFile")) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 }

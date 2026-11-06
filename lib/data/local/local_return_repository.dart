@@ -22,7 +22,9 @@ typedef J = Map<String, dynamic>;
 /// (tests, no server) the same rules run here, with a sales officer acting
 /// for HOLA.
 class LocalReturnRepository extends LocalRepository implements ReturnRepository {
-  LocalReturnRepository(super.db, {this.api});
+  LocalReturnRepository(super.db, {this.api}) {
+    db.onWipe(_pickupInfo.clear);
+  }
   final HolaApi? api;
 
   /// HOLA's returns API is live (0.23.0). Until then HOLA salons can't file
@@ -126,20 +128,16 @@ class LocalReturnRepository extends LocalRepository implements ReturnRepository 
         photoIds.add(await _upload(p));
       }
       final res = await _call(
-        () => api!.post(
-          '/salons/${o.salonId}/returns',
-          {
-            'orderId': o.id,
-            'option': option,
-            'reason': reason,
-            if (note.trim().isNotEmpty) 'note': note.trim(),
-            'items': [
-              for (final i in items) {'orderItemId': i.orderItemId, 'qty': i.qty},
-            ],
-            if (photoIds.isNotEmpty) 'photoIds': photoIds,
-          },
-          headers: {'Idempotency-Key': db.newId() + db.newId()},
-        ),
+        () => api!.post('/salons/${o.salonId}/returns', {
+          'orderId': o.id,
+          'option': option,
+          'reason': reason,
+          if (note.trim().isNotEmpty) 'note': note.trim(),
+          'items': [
+            for (final i in items) {'orderItemId': i.orderItemId, 'qty': i.qty},
+          ],
+          if (photoIds.isNotEmpty) 'photoIds': photoIds,
+        }),
       );
       final r = mirrorReturn(_data(res));
       db.commit();
@@ -328,7 +326,7 @@ class LocalReturnRepository extends LocalRepository implements ReturnRepository 
     final r = returnRequest(returnId) ?? (throw DomainError(tr('Return not found.')));
     if (r.status != ReturnStatus.pickupAssigned || r.pickup?.riderId != requireMe.id) throw DomainError(tr('This pickup is not yours.'));
     if (_server) {
-      final res = await _call(() => api!.post('/rider/return-pickups/${r.id}/collect', const {}, headers: {'Idempotency-Key': db.newId() + db.newId()}));
+      final res = await _call(() => api!.post('/rider/return-pickups/${r.id}/collect', const {}));
       final j = _data(res);
       final x = j.isEmpty ? r : mirrorReturn(j, pickupOnly: true);
       x.pickup?.collectedAt ??= DateTime.tryParse('${j['collectedAt'] ?? ''}')?.toLocal() ?? now();
@@ -449,7 +447,7 @@ class LocalReturnRepository extends LocalRepository implements ReturnRepository 
   }
 
   Future<void> _post(ReturnRequest r, String action, [Map<String, Object?>? body]) async {
-    final res = await _call(() => api!.post('/returns/${r.id}/$action', {...?body, 'version': r.version}, headers: {'Idempotency-Key': db.newId() + db.newId()}));
+    final res = await _call(() => api!.post('/returns/${r.id}/$action', {...?body, 'version': r.version}));
     final j = _data(res);
     j.isEmpty ? await syncReturn(r.id) : mirrorReturn(j);
     db.commit();

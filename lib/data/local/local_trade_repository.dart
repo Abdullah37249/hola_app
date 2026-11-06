@@ -12,7 +12,18 @@ import 'hola_mirror.dart' show branchGeo, money, mirrorPerson;
 import 'local_auth_repository.dart';
 
 class LocalTradeRepository extends LocalRepository implements TradeRepository {
-  LocalTradeRepository(super.db, {this.api});
+  LocalTradeRepository(super.db, {this.api}) {
+    db.onWipe(() {
+      _serverCredit.clear();
+      _payRequests.clear();
+      _serverStatement.clear();
+      _ratings.clear();
+      _coupons.clear();
+      _collections = const [];
+      _creditCollections.clear();
+      _serverCash = null;
+    });
+  }
 
   /// The HOLA server; null keeps everything on the device (widget tests).
   final HolaApi? api;
@@ -32,6 +43,17 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   NotifLink _link(TradeOrder o) => NotifLink('order', o.id);
 
   // ── catalogue ──
+
+  /// Officer tools that change orders, money, stock or products work only on
+  /// the phone's own data. With HOLA connected, HOLA staff do these in the
+  /// HOLA dashboard, where the server checks permissions; faking them here
+  /// would show changes HOLA never made.
+  @override
+  bool get officerToolsOnPhone => api == null;
+
+  void _phoneOnly() {
+    if (!officerToolsOnPhone) throw DomainError(tr('HOLA handles this in the HOLA dashboard.'));
+  }
 
   @override
   Future<void> syncCatalogue() => api == null ? Future.value() : (_syncing ??= _syncCatalogue().whenComplete(() => _syncing = null));
@@ -83,6 +105,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     bool active = true,
   }) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     if (name.trim().length < 2) throw DomainError(tr('Enter the product name.'));
     if (!productCategories.contains(category)) throw DomainError(tr('Pick a category.'));
     if (variants.isEmpty) throw DomainError(tr('Add at least one size or shade.'));
@@ -130,6 +153,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> restock(String productId, String variantId, int qty) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     if (qty <= 0) throw DomainError(tr('Enter how many units arrived.'));
     _variant(productId, variantId).stock += qty;
     db.commit();
@@ -261,15 +285,11 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       final lines = {for (final l in o.lines) l.variantId: l};
       if (picked.keys.any((v) => (lines[v]?.itemId ?? '').isEmpty)) throw DomainError(tr('Refresh your orders and try again.'));
       try {
-        final res = await api!.post(
-          '/orders/${o.id}/product-reviews',
-          {
-            'items': [
-              for (final e in picked.entries) {'orderItemId': lines[e.key]!.itemId, 'rating': e.value.$1, if (e.value.$2.trim().isNotEmpty) 'comment': e.value.$2.trim()},
-            ],
-          },
-          headers: {'Idempotency-Key': db.newId() + db.newId()},
-        );
+        final res = await api!.post('/orders/${o.id}/product-reviews', {
+          'items': [
+            for (final e in picked.entries) {'orderItemId': lines[e.key]!.itemId, 'rating': e.value.$1, if (e.value.$2.trim().isNotEmpty) 'comment': e.value.$2.trim()},
+          ],
+        });
         final list = res is Map ? (res['data'] ?? res['items'] ?? const []) : res;
         for (final j in (list as List).cast<Map>()) {
           _keepProductReview(j, o);
@@ -372,19 +392,15 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       final branch = db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
       try {
         final res =
-            await api!.post(
-                  '/salons/$salonId/orders',
-                  {
-                    'branchId': branch.id,
-                    'paymentMethod': payment == PaymentMethod.credit ? 'CREDIT' : 'COD',
-                    'items': [
-                      for (final l in lines) {'variantId': l.variantId, 'qty': l.qty},
-                    ],
-                    if (notes.trim().isNotEmpty) 'notes': notes.trim(),
-                    if (couponCode != null && couponCode.isNotEmpty) 'couponCode': couponCode,
-                  },
-                  headers: {'Idempotency-Key': db.newId() + db.newId()},
-                )
+            await api!.post('/salons/$salonId/orders', {
+                  'branchId': branch.id,
+                  'paymentMethod': payment == PaymentMethod.credit ? 'CREDIT' : 'COD',
+                  'items': [
+                    for (final l in lines) {'variantId': l.variantId, 'qty': l.qty},
+                  ],
+                  if (notes.trim().isNotEmpty) 'notes': notes.trim(),
+                  if (couponCode != null && couponCode.isNotEmpty) 'couponCode': couponCode,
+                })
                 as J;
         final o = _mirrorOrder(res, salonId, fallback: lines, payment: payment, by: me.id);
         db.commit();
@@ -605,7 +621,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     if (amount <= 0) throw DomainError(tr('Enter the cash you took.'), field: 'amount');
     if (c != null && amount > c.amount) throw DomainError(tr('That is more than the salon is paying ({amount}).', {'amount': rs(c.amount)}), field: 'amount');
     try {
-      await api!.post('/rider/credit-collections/$id/confirm', {'amount': '$amount.00'}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+      await api!.post('/rider/credit-collections/$id/confirm', {'amount': '$amount.00'});
     } on ApiError catch (e) {
       throw apiToDomain(e);
     }
@@ -616,7 +632,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   Future<void> declineCollection(String id, String reason) async {
     requireRole({Role.rider});
     try {
-      await api!.post('/rider/credit-collections/$id/decline', {'reason': reason.trim()}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+      await api!.post('/rider/credit-collections/$id/decline', {'reason': reason.trim()});
     } on ApiError catch (e) {
       throw apiToDomain(e);
     }
@@ -636,7 +652,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     final asked = _creditCollections.values.where((c) => c.requestId == requestId).firstOrNull;
     if (asked != null && amount > asked.amount) throw DomainError(tr('That is more than the salon is paying ({amount}).', {'amount': rs(asked.amount)}), field: 'amount');
     try {
-      await api!.post('/rider/credit-collections/$requestId', {'amount': '$amount.00'}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+      await api!.post('/rider/credit-collections/$requestId', {'amount': '$amount.00'});
     } on ApiError catch (e) {
       throw apiToDomain(e);
     }
@@ -728,18 +744,14 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
         final png = proofPath.toLowerCase().endsWith('.png');
         proofId = await api!.uploadFile(bytes, contentType: png ? 'image/png' : 'image/jpeg', purpose: 'payment_proof', fileName: 'payment-proof.${png ? 'png' : 'jpg'}');
       }
-      final res = await api!.post(
-        '/salons/$salonId/credit/payment-requests',
-        {
-          'method': method.api,
-          'amount': '$amount.00',
-          if (reference.trim().isNotEmpty) 'reference': reference.trim(),
-          'proofFileId': ?proofId,
-          if (note.trim().isNotEmpty) 'note': note.trim(),
-          if (method == PayMethod.rider && riderPickLive) 'riderId': ?riderId,
-        },
-        headers: {'Idempotency-Key': db.newId() + db.newId()},
-      );
+      final res = await api!.post('/salons/$salonId/credit/payment-requests', {
+        'method': method.api,
+        'amount': '$amount.00',
+        if (reference.trim().isNotEmpty) 'reference': reference.trim(),
+        'proofFileId': ?proofId,
+        if (note.trim().isNotEmpty) 'note': note.trim(),
+        if (method == PayMethod.rider && riderPickLive) 'riderId': ?riderId,
+      });
       final r = res is Map ? _payRequest(res, salonId) : null;
       if (r != null) _payRequests[salonId] = [r, ...paymentRequests(salonId).where((x) => x.id != r.id)];
       db.commit();
@@ -753,7 +765,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   Future<void> cancelPaymentRequest(String salonId, String requestId) async {
     requireRole({Role.salonOwner});
     try {
-      await api!.post('/salons/$salonId/credit/payment-requests/$requestId/cancel', const {}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+      await api!.post('/salons/$salonId/credit/payment-requests/$requestId/cancel', const {});
     } on ApiError catch (e) {
       throw apiToDomain(e);
     }
@@ -797,7 +809,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
 
   Future<void> _serverAction(TradeOrder o, String action, [Object? body]) async {
     try {
-      final res = await api!.post('/orders/${o.id}/$action', body ?? const {}, headers: {'Idempotency-Key': db.newId() + db.newId()}) as J;
+      final res = await api!.post('/orders/${o.id}/$action', body ?? const {}) as J;
       _mirrorOrder(res, o.salonId, fallback: o.lines, payment: o.payment, by: o.placedById);
       db.commit();
     } on ApiError catch (e) {
@@ -1022,6 +1034,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> approveOrder(String id) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     final o = _order(id);
     _move(o, OrderStatus.approved, {OrderStatus.placed, OrderStatus.underReview});
     db.notify(_salon(o.salonId).ownerId, 'Order approved', '{code} is being packed.', args: {'code': o.code}, icon: 'check', link: _link(o));
@@ -1064,6 +1077,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> dispatch(String id, String riderId) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     final o = _order(id);
     final rider = db.accounts.where((a) => a.id == riderId && a.role == Role.rider).firstOrNull ?? (throw DomainError(tr('Pick a rider.')));
     _move(o, OrderStatus.dispatched, {OrderStatus.approved, OrderStatus.failed}, note: rider.name);
@@ -1206,6 +1220,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> setCreditTerms(String salonId, {required int limit, required int days}) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     final s = _salon(salonId);
     if (limit < 0) throw DomainError(tr("The limit can't be negative."));
     if (days < 1 || days > 120) throw DomainError(tr('Credit days must be between 1 and 120.'));
@@ -1219,6 +1234,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> recordPayment(String salonId, int amount, String note) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     final s = _salon(salonId);
     if (amount <= 0) throw DomainError(tr('Enter the amount received.'));
     if (amount > credit(salonId).outstanding) throw DomainError(tr('That is more than the salon owes.'));
@@ -1315,13 +1331,9 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     final J h;
     try {
       h =
-          await api!.post(
-                '/rider/cash-handovers',
-                {
-                  'paymentIds': [for (final p in held) p.id],
-                },
-                headers: {'Idempotency-Key': db.newId() + db.newId()},
-              )
+          await api!.post('/rider/cash-handovers', {
+                'paymentIds': [for (final p in held) p.id],
+              })
               as J;
     } on ApiError catch (e) {
       if (e.code == 'INVALID_REFERENCE' || e.status == 409) {
@@ -1380,6 +1392,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   @override
   Future<void> confirmHandover(String id) async {
     requireRole({Role.salesOfficer});
+    _phoneOnly();
     final h = db.handovers.where((x) => x.id == id).firstOrNull ?? (throw DomainError(tr('Handover not found.')));
     if (h.status == 'CONFIRMED') throw DomainError(tr('Already confirmed.'));
     h

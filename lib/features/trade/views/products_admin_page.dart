@@ -29,7 +29,7 @@ class _Body extends StatelessWidget {
     final list = vm.products;
     return HPage(
       title: tr('Products'),
-      footer: HButton(tr('Add product'), icon: 'plus', block: true, onTap: () => pushPage(context, const ProductEditorPage())),
+      footer: vm.canEdit ? HButton(tr('Add product'), icon: 'plus', block: true, onTap: () => pushPage(context, const ProductEditorPage())) : null,
       children: [
         ...staggered([
           Text(tr('Products'), style: T.h1(context)),
@@ -61,7 +61,7 @@ class _Body extends StatelessWidget {
             icon: 'box',
             title: tr('No products yet'),
             text: tr('Add HOLA products with their sizes or shades, trade prices and stock. Salons can order them straight away.'),
-            cta: HButton(tr('Add the first product'), kind: BtnKind.secondary, small: true, onTap: () => pushPage(context, const ProductEditorPage())),
+            cta: vm.canEdit ? HButton(tr('Add the first product'), kind: BtnKind.secondary, small: true, onTap: () => pushPage(context, const ProductEditorPage())) : null,
           )
         else
           ...staggered([
@@ -69,7 +69,7 @@ class _Body extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: HCard(
-                  onTap: () => pushPage(context, ProductEditorPage(productId: p.id)),
+                  onTap: vm.canEdit ? () => pushPage(context, ProductEditorPage(productId: p.id)) : null,
                   child: VStack(gap: 10, [
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,8 +108,7 @@ class _Body extends StatelessWidget {
                             v.stock <= 0 ? tr('Out of stock') : tr('{n} in stock', {'n': v.stock}),
                             style: T.cap(context).copyWith(fontWeight: FontWeight.w600, color: v.stock < ProductsAdminViewModel.lowStock ? (v.stock <= 0 ? c.badInk : c.accentInk) : c.muted),
                           ),
-                          const SizedBox(width: 8),
-                          HButton(tr('Restock'), kind: BtnKind.soft, small: true, onTap: () => _restock(context, vm, p, v)),
+                          if (vm.canEdit) ...[const SizedBox(width: 8), HButton(tr('Restock'), kind: BtnKind.soft, small: true, onTap: () => _restock(context, vm, p, v))],
                         ],
                       ),
                   ]),

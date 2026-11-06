@@ -39,7 +39,7 @@ class _Body extends StatelessWidget {
     final rows = vm.ledger;
     return HPage(
       title: tr('Credit statement'),
-      footer: vm.isOfficer
+      footer: vm.canManage
           ? Row(
               children: [
                 Expanded(
@@ -51,7 +51,7 @@ class _Body extends StatelessWidget {
                 ),
               ],
             )
-          : cr.outstanding > 0
+          : !vm.isOfficer && cr.outstanding > 0
           ? HButton(
               tr('Pay outstanding'),
               icon: 'cash',
