@@ -11,9 +11,16 @@ class Variant {
   final String id;
   String name; // e.g. "7.1 Ash Blonde" or "1 L"
   int tradePrice, retailPrice, stock;
-  Variant({required this.id, required this.name, required this.tradePrice, required this.retailPrice, required this.stock});
-  Json toJson() => {'id': id, 'name': name, 'tradePrice': tradePrice, 'retailPrice': retailPrice, 'stock': stock};
-  factory Variant.fromJson(Json j) => Variant(id: j['id'], name: j['name'], tradePrice: asInt(j['tradePrice']), retailPrice: asInt(j['retailPrice']), stock: asInt(j['stock']));
+
+  /// HOLA's stock code, as the dashboard shows it.
+  String sku;
+
+  /// Pack size from the dashboard, e.g. "1000 ML" (contract 0.28.0).
+  String size;
+  Variant({required this.id, required this.name, required this.tradePrice, required this.retailPrice, required this.stock, this.sku = '', this.size = ''});
+  Json toJson() => {'id': id, 'name': name, 'tradePrice': tradePrice, 'retailPrice': retailPrice, 'stock': stock, 'sku': sku, 'size': size};
+  factory Variant.fromJson(Json j) =>
+      Variant(id: j['id'], name: j['name'], tradePrice: asInt(j['tradePrice']), retailPrice: asInt(j['retailPrice']), stock: asInt(j['stock']), sku: j['sku'] ?? '', size: j['size'] ?? '');
 }
 
 class Product {
@@ -31,6 +38,12 @@ class Product {
   /// Product photo from HOLA (https), shown instead of the drawn bottle.
   String imageUrl;
 
+  /// All of HOLA's photos, main one first (the dashboard's upload order).
+  List<String> imageUrls;
+
+  /// Brand, as set in the HOLA dashboard.
+  String brand;
+
   /// Comes from the HOLA server catalogue (ordered through the server).
   bool hola;
 
@@ -47,8 +60,16 @@ class Product {
     this.active = true,
     required this.createdAt,
     this.imageUrl = '',
+    List<String>? imageUrls,
+    this.brand = '',
     this.hola = false,
-  });
+  }) : imageUrls = imageUrls ?? [];
+
+  /// Photos to show, main first; empty when HOLA has none.
+  List<String> get photos => [
+    for (final u in {if (imageUrl.isNotEmpty) imageUrl, ...imageUrls})
+      if (u.startsWith('https://')) u,
+  ];
 
   bool get hasScheme => schemeBuy > 0 && schemeFree > 0;
   String get schemeLabel => hasScheme ? tr('Buy {buy} get {free}', {'buy': schemeBuy, 'free': schemeFree}) : '';
@@ -68,6 +89,8 @@ class Product {
     'active': active,
     'createdAt': iso(createdAt),
     'imageUrl': imageUrl,
+    'imageUrls': imageUrls,
+    'brand': brand,
     'hola': hola,
   };
   factory Product.fromJson(Json j) => Product(
@@ -83,18 +106,23 @@ class Product {
     active: j['active'] ?? true,
     createdAt: dt(j['createdAt'])!,
     imageUrl: j['imageUrl'] ?? '',
+    imageUrls: strs(j['imageUrls']),
+    brand: j['brand'] ?? '',
     hola: j['hola'] ?? false,
   );
 }
 
 class OrderLine {
   final String productId, variantId, name;
+
+  /// HOLA's order item id (empty for an on-device order); returns name it.
+  final String itemId;
   final int qty, freeQty, unitPrice;
-  const OrderLine({required this.productId, required this.variantId, required this.name, required this.qty, required this.freeQty, required this.unitPrice});
+  const OrderLine({required this.productId, required this.variantId, required this.name, required this.qty, required this.freeQty, required this.unitPrice, this.itemId = ''});
   int get total => qty * unitPrice;
-  Json toJson() => {'productId': productId, 'variantId': variantId, 'name': name, 'qty': qty, 'freeQty': freeQty, 'unitPrice': unitPrice};
+  Json toJson() => {'productId': productId, 'variantId': variantId, 'name': name, 'qty': qty, 'freeQty': freeQty, 'unitPrice': unitPrice, if (itemId.isNotEmpty) 'itemId': itemId};
   factory OrderLine.fromJson(Json j) =>
-      OrderLine(productId: j['productId'], variantId: j['variantId'], name: j['name'], qty: asInt(j['qty']), freeQty: asInt(j['freeQty']), unitPrice: asInt(j['unitPrice']));
+      OrderLine(productId: j['productId'], variantId: j['variantId'], name: j['name'], qty: asInt(j['qty']), freeQty: asInt(j['freeQty']), unitPrice: asInt(j['unitPrice']), itemId: j['itemId'] ?? '');
 }
 
 abstract final class OrderStatus {
@@ -124,6 +152,10 @@ class TradeOrder {
 
   /// A HOLA coupon used on the order, and what it took off.
   String? couponCode;
+
+  /// Set on a replacement order HOLA made for a return: that return's code
+  /// and the original order's code. A replacement costs the salon nothing.
+  String? replacementFor, replacementOfOrder;
   int discount;
   final List<StatusEvent> history;
   final DateTime createdAt;
@@ -146,6 +178,8 @@ class TradeOrder {
     this.deliveredWhere,
     this.couponCode,
     this.discount = 0,
+    this.replacementFor,
+    this.replacementOfOrder,
     List<StatusEvent>? history,
     required this.createdAt,
   }) : history = history ?? [];
@@ -178,6 +212,8 @@ class TradeOrder {
     'deliveredWhere': deliveredWhere?.toJson(),
     if (couponCode != null) 'couponCode': couponCode,
     if (discount != 0) 'discount': discount,
+    if (replacementFor != null) 'replacementFor': replacementFor,
+    if (replacementOfOrder != null) 'replacementOfOrder': replacementOfOrder,
     'signature': signature == null
         ? null
         : [
@@ -198,6 +234,8 @@ class TradeOrder {
     lines: objs(j['lines'], OrderLine.fromJson),
     payment: PaymentMethod.values.byName(j['payment']),
     notes: j['notes'] ?? '',
+    replacementFor: j['replacementFor'],
+    replacementOfOrder: j['replacementOfOrder'],
     status: j['status'],
     riderId: j['riderId'],
     recipientName: j['recipientName'],
@@ -226,13 +264,24 @@ class SalonCoupon {
   final String discountText;
   final int? usesLeft;
 
-  /// Products it's for (empty: the whole order).
+  /// Smallest order (or spend on the products on offer) it works on.
+  final int? minOrder;
+
+  /// Products it's for (empty, or appliesTo ORDER: the whole order).
   final List<String> products;
+
+  /// When and on which order this salon used it.
+  final DateTime? usedAt;
+  final String usedOnOrder;
+
+  /// The active order holding it (status RESERVED). It is freed if that
+  /// order is cancelled, and used for good once the order completes.
+  final String reservedOnOrder;
 
   /// Last day it can be used (a whole day, Karachi time), and first day.
   final DateTime? validUntil, validFrom;
 
-  /// AVAILABLE | UPCOMING (campaign not started) | USED | EXPIRED
+  /// AVAILABLE | RESERVED (on an active order) | UPCOMING (campaign not started) | USED | EXPIRED
   final String status;
   const SalonCoupon({
     required this.id,
@@ -242,7 +291,11 @@ class SalonCoupon {
     this.description = '',
     this.discountText = '',
     this.usesLeft,
+    this.minOrder,
     this.products = const [],
+    this.usedAt,
+    this.usedOnOrder = '',
+    this.reservedOnOrder = '',
     this.validUntil,
     this.validFrom,
     this.status = 'AVAILABLE',
@@ -250,6 +303,8 @@ class SalonCoupon {
 
   /// HOLA decides (dates, uses left, campaign running).
   bool get available => status == 'AVAILABLE';
+  bool get used => status == 'USED' || usedAt != null;
+  bool get reserved => status == 'RESERVED';
 }
 
 /// HOLA's price for a cart, with a coupon applied when given.
@@ -315,10 +370,14 @@ class PaymentRequest {
   /// ([confirmedAmount]); either may be less than [amount].
   final int? collectedAmount, confirmedAmount;
 
-  /// PENDING | COLLECTED (rider has the cash) | CONFIRMED | REJECTED | CANCELLED
+  /// PENDING | COLLECTED (rider has the cash) | PAID (rider confirmed) |
+  /// CONFIRMED | REJECTED | CANCELLED
   final String status;
   final String reference, note;
   final String? proofFileId, rejectReason, collectedBy, decidedBy;
+
+  /// The rider the salon chose to pay (RIDER method).
+  final String? riderName;
   final DateTime createdAt;
   final DateTime? decidedAt;
   const PaymentRequest({
@@ -336,13 +395,31 @@ class PaymentRequest {
     this.rejectReason,
     this.collectedBy,
     this.decidedBy,
+    this.riderName,
     required this.createdAt,
     this.decidedAt,
   });
   bool get open => status == 'PENDING' || status == 'COLLECTED';
 
+  /// Done: the money reached HOLA's books.
+  bool get paid => status == 'PAID' || status == 'CONFIRMED';
+
   /// The most certain amount so far: counted, else collected, else asked.
   int get shown => confirmedAmount ?? collectedAmount ?? amount;
+}
+
+/// A HOLA rider a salon can hand its credit payment to.
+class RiderOption {
+  final String id, name, phone, city;
+  const RiderOption({required this.id, required this.name, this.phone = '', this.city = ''});
+}
+
+/// Rider app: a salon chose this rider to pay its HOLA balance to.
+class CollectionRequest {
+  final String id, code, salonName, salonPhone, address;
+  final int amount;
+  final DateTime createdAt;
+  const CollectionRequest({required this.id, required this.code, required this.salonName, this.salonPhone = '', this.address = '', required this.amount, required this.createdAt});
 }
 
 /// A salon's credit payment the rider should also collect on this delivery.
@@ -373,8 +450,33 @@ class CashHandover {
   String status; // PENDING | CONFIRMED
   String? confirmedById;
   DateTime? confirmedAt;
-  CashHandover({required this.id, required this.riderId, required this.orderIds, required this.amount, required this.at, this.status = 'PENDING', this.confirmedById, this.confirmedAt});
-  Json toJson() => {'id': id, 'riderId': riderId, 'orderIds': orderIds, 'amount': amount, 'at': iso(at), 'status': status, 'confirmedById': confirmedById, 'confirmedAt': iso(confirmedAt)};
+
+  /// Cash amounts handed over: deliveries plus salon credit payments, which
+  /// have no order of their own (HOLA sends the count).
+  final int? paymentCount;
+  int get items => paymentCount ?? orderIds.length;
+  CashHandover({
+    required this.id,
+    required this.riderId,
+    required this.orderIds,
+    required this.amount,
+    required this.at,
+    this.status = 'PENDING',
+    this.confirmedById,
+    this.confirmedAt,
+    this.paymentCount,
+  });
+  Json toJson() => {
+    'id': id,
+    'riderId': riderId,
+    'orderIds': orderIds,
+    'amount': amount,
+    'at': iso(at),
+    'status': status,
+    'confirmedById': confirmedById,
+    'confirmedAt': iso(confirmedAt),
+    if (paymentCount != null) 'paymentCount': paymentCount,
+  };
   factory CashHandover.fromJson(Json j) => CashHandover(
     id: j['id'],
     riderId: j['riderId'],
@@ -384,5 +486,57 @@ class CashHandover {
     status: j['status'],
     confirmedById: j['confirmedById'],
     confirmedAt: dt(j['confirmedAt']),
+    paymentCount: j['paymentCount'] == null ? null : asInt(j['paymentCount']),
+  );
+}
+
+/// A salon's rating of a HOLA product it ordered and received. These are
+/// HOLA's (its dashboard), never mixed with customers' salon reviews.
+class ProductReview {
+  final String id, salonId, orderId, orderCode, productId, variantId, name;
+
+  /// HOLA's order item id (empty for an on-device order).
+  final String orderItemId;
+  final int rating;
+  final String comment;
+  final DateTime createdAt;
+  const ProductReview({
+    required this.id,
+    required this.salonId,
+    required this.orderId,
+    this.orderCode = '',
+    required this.productId,
+    required this.variantId,
+    required this.name,
+    this.orderItemId = '',
+    required this.rating,
+    this.comment = '',
+    required this.createdAt,
+  });
+  Json toJson() => {
+    'id': id,
+    'salonId': salonId,
+    'orderId': orderId,
+    'orderCode': orderCode,
+    'productId': productId,
+    'variantId': variantId,
+    'name': name,
+    'orderItemId': orderItemId,
+    'rating': rating,
+    'comment': comment,
+    'createdAt': iso(createdAt),
+  };
+  factory ProductReview.fromJson(Json j) => ProductReview(
+    id: j['id'],
+    salonId: j['salonId'],
+    orderId: j['orderId'],
+    orderCode: j['orderCode'] ?? '',
+    productId: j['productId'] ?? '',
+    variantId: j['variantId'] ?? '',
+    name: j['name'] ?? '',
+    orderItemId: j['orderItemId'] ?? '',
+    rating: asInt(j['rating']),
+    comment: j['comment'] ?? '',
+    createdAt: dt(j['createdAt'])!,
   );
 }

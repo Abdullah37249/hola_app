@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../../core/l10n/l10n.dart';
 import '../../core/utils/clock.dart';
 import '../../core/utils/format.dart';
@@ -6,7 +7,9 @@ import '../../domain/repositories/repositories.dart';
 import '../../domain/services/availability.dart';
 import 'local_auth_repository.dart';
 import 'hola_mirror.dart';
+import 'local_database.dart';
 import 'hola_salon_sync.dart';
+import 'offer_rules.dart';
 import '../../core/network/api.dart';
 import '../../domain/entities/json.dart' show asInt;
 
@@ -58,7 +61,7 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   Future<Appointment> _remote(Future<dynamic> Function() call, {Map<String, String> codes = const {}}) async {
     try {
       final res = await call();
-      final a = mirrorAppointment(db, res as J);
+      final a = mirrorAppointment(db, res as J, actor: me?.id);
       db.commit();
       return a;
     } on ApiError catch (e) {
@@ -93,6 +96,8 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     if (!_synced.contains(m.id) || before == a.status) return;
     final args = {'salon': _salon(a.salonId).name, 'name': a.customerName, ..._whenArgs(a)};
     final link = NotifLink('appointment', a.id);
+    // HOLA's push about this change already landed.
+    if (db.recentAbout(m.id, link) != null) return;
     if (m.role == Role.customer) {
       switch (a.status) {
         case ApptStatus.confirmed when before == ApptStatus.requested:
@@ -110,6 +115,35 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
       } else if (a.status == ApptStatus.cancelledByCustomer) {
         db.notify(m.id, 'Booking cancelled', '{name} cancelled {day} at {time}.', args: args, icon: 'x', link: link);
       }
+    }
+  }
+
+  @override
+  Future<void> syncBookingHistory(String id) async {
+    final a = appointment(id);
+    if (a == null || !a.hola || api == null) return;
+    try {
+      final res = await api!.get('/appointments/$id/history');
+      final list = (res is Map ? (res['data'] as List? ?? const []) : res as List).cast<Map>();
+      if (list.isEmpty) return;
+      final events = [
+        for (final e in list)
+          StatusEvent('${e['toStatus']}', DateTime.tryParse('${e['at']}')?.toLocal() ?? a.createdAt, '${(e['actor'] as Map?)?['id'] ?? ''}', switch ('${e['note'] ?? ''}'.trim()) {
+            '' => null,
+            final n => n,
+          }),
+      ];
+      for (final e in list) {
+        final actor = e['actor'] as Map?;
+        // Salon people get a name to show; customers are named on the booking.
+        if (actor?['kind'] == 'SALON' && actor?['id'] != null) mirrorPerson(db, '${actor!['id']}', '${actor['fullName'] ?? ''}', salonId: a.salonId);
+      }
+      a.history
+        ..clear()
+        ..addAll(events);
+      db.commit();
+    } catch (e) {
+      debugPrint('Booking history: sync failed: $e'); // keep what the phone has
     }
   }
 
@@ -153,6 +187,61 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     }
   }
 
+  // ── client history (contract 0.16.0) ──
+
+  final _clients = <String, List<ClientRecord>>{};
+
+  @override
+  List<ClientRecord> clientList(String salonId) => _clients[salonId] ?? const [];
+
+  @override
+  Future<void> syncClients(String salonId) async {
+    if (!_isHola(salonId)) return;
+    final out = <ClientRecord>[];
+    for (var page = 1, pages = 1; page <= pages && page <= 20; page++) {
+      final res = await api!.get('/salons/$salonId/clients', query: {'page': '$page', 'pageSize': '100'}) as J;
+      pages = asInt((res['meta'] as Map?)?['totalPages'], 1);
+      for (final j in (res['data'] as List).cast<Map>()) {
+        DateTime? t(String k) => DateTime.tryParse('${j[k] ?? ''}')?.toLocal();
+        // Contract 0.18.0: `visits` counts completed visits and `bookings` all of them.
+        final v18 = j.containsKey('bookings');
+        out.add(
+          ClientRecord(
+            customerId: j['customerId'] as String?,
+            name: '${j['name'] ?? ''}',
+            phone: '${j['phone'] ?? ''}',
+            visits: asInt(v18 ? j['bookings'] : j['visits'], 0),
+            completedVisits: asInt(v18 ? j['visits'] : j['completedVisits'], 0),
+            totalSpent: (double.tryParse('${j['totalSpent'] ?? 0}') ?? 0).round(),
+            firstVisitAt: t('firstVisitAt'),
+            lastVisitAt: t('lastVisitAt'),
+            lastBookingAt: t('lastBookingAt'),
+          ),
+        );
+      }
+    }
+    _clients[salonId] = out;
+    db.commit();
+  }
+
+  @override
+  Future<void> syncClientHistory(String salonId, {String? customerId, String phone = '', String name = ''}) async {
+    if (!_isHola(salonId)) return;
+    final path = customerId != null ? '/salons/$salonId/clients/$customerId/appointments' : '/salons/$salonId/clients/walk-in/appointments';
+    final who = customerId != null ? const <String, String>{} : (phone.trim().isNotEmpty ? {'phone': phone.trim()} : {'name': name.trim()});
+    if (customerId == null && who.values.first.isEmpty) return;
+    for (var page = 1, pages = 1; page <= pages && page <= 20; page++) {
+      final res = await api!.get(path, query: {...who, 'page': '$page', 'pageSize': '100'});
+      final list = res is Map ? (res['data'] as List? ?? const []) : res as List;
+      if (res is Map) pages = asInt((res['meta'] as Map?)?['totalPages'], 1);
+      for (final j in list.cast<J>()) {
+        // Old visits aren't news: remember their status so nothing is announced.
+        _seen[j['id'] as String] = mirrorAppointment(db, j).status;
+      }
+    }
+    db.commit();
+  }
+
   Salon _salon(String id) => db.salons.where((s) => s.id == id).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
   Appointment _appt(String id) => appointment(id) ?? (throw DomainError(tr('Appointment not found.')));
   List<ServiceItem> _services(List<String> ids) => [for (final id in ids) db.services.where((s) => s.id == id).firstOrNull ?? (throw DomainError(tr('A service is no longer offered.')))];
@@ -168,7 +257,8 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     return availableSlots(
       day: day,
       branch: b,
-      staff: db.staff.where((s) => s.salonId == b.salonId).toList(),
+      // Only the team members who work at this branch (the first branch by default).
+      staff: db.staff.where((s) => s.salonId == b.salonId && worksAt(db, s, branchId)).toList(),
       appointments: db.appointments.where((a) => a.salonId == b.salonId).toList(),
       leave: db.leave.where((l) => l.salonId == b.salonId).toList(),
       durationMin: dur,
@@ -212,6 +302,7 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   Future<Appointment> book({required String salonId, required String branchId, required List<String> serviceIds, String? staffId, required DateTime start, String notes = ''}) async {
     requireRole({Role.customer});
     if (_isHola(salonId)) {
+      // HOLA applies each service's best offer itself (contract 0.20.0).
       final key = DateTime.now().microsecondsSinceEpoch.toRadixString(36) + db.newId(); // one booking even if the request is retried
       return _remote(
         () => api!.post(
@@ -226,6 +317,16 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     final s = _salon(salonId);
     if (!s.isListed) throw DomainError(tr('This salon is not taking bookings right now.'));
     final svcs = _services(serviceIds);
+    // Each service's best offer this customer can still use, checked again now
+    // (an offer that ended or was switched off while choosing isn't applied).
+    final offers = <ServiceOffer>[];
+    var discount = 0;
+    for (final x in svcs) {
+      if (bestOfferOn(db, me.id, x) case final o?) {
+        offers.add(o);
+        discount += o.discountOn(x.price);
+      }
+    }
     final slot = _slotOrThrow(branchId, serviceIds, staffId, start);
     final status = s.autoConfirm ? ApptStatus.confirmed : ApptStatus.requested;
     final a = Appointment(
@@ -241,7 +342,9 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
       serviceNames: [for (final x in svcs) x.name],
       startsAt: start,
       durationMin: svcs.fold(0, (t, x) => t + x.durationMin),
-      price: svcs.fold(0, (t, x) => t + x.price),
+      price: svcs.fold(0, (t, x) => t + x.price) - discount,
+      offerIds: [for (final o in offers) o.id],
+      discount: discount,
       status: status,
       notes: notes.trim(),
       history: [StatusEvent(ApptStatus.requested, now(), me.id), if (s.autoConfirm) StatusEvent(ApptStatus.confirmed, now(), 'auto')],
@@ -282,6 +385,30 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     if (requireMe.salonId != salonId) throw DomainError(tr('Not your salon.'));
     if (guestName.trim().length < 2) throw DomainError(tr("Enter the client's name."));
     if (serviceIds.isEmpty) throw DomainError(tr('Pick at least one service.'));
+    // HOLA salons: the walk-in goes on HOLA's calendar, so the slot is taken
+    // for online bookings too (contract 0.18.1: starts CONFIRMED).
+    if (_isHola(salonId)) {
+      final key = DateTime.now().microsecondsSinceEpoch.toRadixString(36) + db.newId();
+      return _remote(
+        () => api!.post(
+          '/salons/$salonId/appointments',
+          {
+            'branchId': branchId,
+            'serviceIds': serviceIds,
+            if (staffId.isNotEmpty) 'staffId': staffId,
+            'startsAt': start.toUtc().toIso8601String(),
+            'guest': {'fullName': guestName.trim(), if (guestPhone.trim().isNotEmpty) 'phone': guestPhone.trim()},
+          },
+          headers: {'Idempotency-Key': key},
+        ),
+        codes: {
+          ..._slotCodes,
+          'APPOINTMENT_SLOT_UNAVAILABLE': tr('That professional isn’t free then (opening hours, shift or time off). Pick another time or professional.'),
+          'APPOINTMENT_TOO_EARLY': tr('That time has passed. Pick a time from now on.'),
+          'FORBIDDEN': tr('Only the owner or a manager can add walk-ins.'),
+        },
+      );
+    }
     final svcs = _services(serviceIds);
     final dur = svcs.fold(0, (t, x) => t + x.durationMin);
     final end = start.add(Duration(minutes: dur));
@@ -443,7 +570,7 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
       return;
     }
     final a = _forSalon(id);
-    if (a.startsAt.difference(now()).inHours >= 2) throw DomainError(tr('Check-in opens 2 hours before the appointment.'));
+    if (a.startsAt.difference(now()).inMinutes > _salon(a.salonId).checkInEarlyMin) throw DomainError(tr('Check-in opens 2 hours before the appointment.'));
     _move(a, ApptStatus.checkedIn, from: {ApptStatus.confirmed});
     db.commit();
   }
@@ -484,3 +611,6 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
     db.commit();
   }
 }
+
+/// Whether [p] works at [branchId]: their own branch, or the salon's first one.
+bool worksAt(LocalDatabase db, StaffProfile p, String branchId) => (p.branchId ?? db.branches.where((b) => b.salonId == p.salonId && !b.id.endsWith('~delivery')).firstOrNull?.id) == branchId;

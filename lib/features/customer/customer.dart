@@ -6,3 +6,4 @@ export 'views/explore_view.dart' show CustomerExplore;
 export 'views/feedback_view.dart' show MyFeedbackPage;
 export 'views/home_view.dart' show CustomerHome;
 export 'views/salon_view.dart' show SalonPage;
+export 'views/offers_view.dart' show CustomerOffersPage;

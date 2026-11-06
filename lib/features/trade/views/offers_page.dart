@@ -41,7 +41,11 @@ class OffersPage extends StatelessWidget {
                 ),
               if (gone.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                SecHead(tr('Coming up, used or expired')),
+                SecHead(tr('Coming up, held, used or expired')),
+                if (gone.any((c) => c.reserved)) ...[
+                  const SizedBox(height: 6),
+                  Text(tr('A held coupon is on an order that hasn’t been delivered yet. If that order is cancelled, you can use it again.'), style: T.sm(context).copyWith(color: context.c.muted)),
+                ],
                 const SizedBox(height: 12),
                 for (final cp in gone) Padding(padding: const EdgeInsets.only(bottom: 12), child: PromoCard(cp, onUse: null, dim: true)),
               ],

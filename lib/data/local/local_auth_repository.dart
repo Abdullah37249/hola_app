@@ -9,6 +9,8 @@ import 'local_database.dart';
 import '../../core/network/api.dart';
 import 'hola_mirror.dart';
 import 'hola_salon_sync.dart';
+import 'fingerprint_store.dart';
+import '../../core/security/biometrics.dart' show bio;
 
 /// Shared plumbing for the on-device repositories.
 abstract class LocalRepository implements Observable {
@@ -52,7 +54,7 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
   /// server (owner's rule: no accounts that exist only on the phone) and the
   /// account is mirrored here for the screens. Without it (tests), accounts
   /// live on the device only.
-  LocalAuthRepository(super.db, {this.api}) {
+  LocalAuthRepository(super.db, {this.api, FingerprintStore? fingerprints}) : _fpStore = fingerprints ?? (api == null ? MemoryFingerprintStore() : SecureFingerprintStore()) {
     api?.onSessionEnded = () {
       db.sessionAccountId = null;
       db.commit();
@@ -60,9 +62,87 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
   }
   final HolaApi? api;
 
+  // ── fingerprint sign-in ──
+
+  final FingerprintStore _fpStore;
+  List<FingerprintAccount> _fps = [];
+
+  /// Accounts with a kept session (signed out, fingerprint sign-in on).
+  final _parked = <String>{};
+  Set<String> _offered = {};
+
+  @override
+  bool fingerprintOn(String accountId) => _fps.any((f) => f.accountId == accountId);
+
+  @override
+  List<FingerprintAccount> get resumable => me != null
+      ? const []
+      : [
+          for (final f in _fps)
+            if (_parked.contains(f.accountId)) f,
+        ];
+
+  @override
+  bool fingerprintOffered(String accountId) => _offered.contains(accountId);
+
+  @override
+  Future<void> markFingerprintOffered(String accountId) async {
+    _offered.add(accountId);
+    await _fpStore.addOffered(accountId);
+  }
+
+  @override
+  Future<void> enableFingerprint() async {
+    final a = requireMe;
+    if (api == null) throw DomainError(bio(tr('Fingerprint sign-in works with your HOLA account only.')));
+    _fps = [..._fps.where((f) => f.accountId != a.id), FingerprintAccount(accountId: a.id, name: a.name, email: a.email, role: a.role.name)];
+    await _fpStore.write(_fps);
+    await markFingerprintOffered(a.id);
+    db.commit();
+  }
+
+  @override
+  Future<void> disableFingerprint([String? accountId]) async {
+    final id = accountId ?? requireMe.id;
+    _fps = _fps.where((f) => f.accountId != id).toList();
+    _parked.remove(id);
+    await _fpStore.write(_fps);
+    await api?.dropParked(id);
+    db.commit();
+  }
+
+  @override
+  Future<Account> resumeWithFingerprint(String accountId) async {
+    if (api == null || !fingerprintOn(accountId) || !_parked.contains(accountId)) throw DomainError(tr('Sign in with your email and password.'));
+    try {
+      final a = await _serverSignIn(() => api!.resumeParked(accountId));
+      _parked.remove(accountId);
+      await api!.forgetParked(accountId);
+      return a;
+    } on DomainError catch (e) {
+      // HOLA ended the session (30 days unused, password changed, signed out
+      // everywhere): fingerprint sign-in starts again after a password sign-in.
+      if (!await api!.hasParked(accountId)) {
+        _fps = _fps.where((f) => f.accountId != accountId).toList();
+        _parked.remove(accountId);
+        await _fpStore.write(_fps);
+        db.commit();
+        throw DomainError(bio(tr('Your fingerprint sign-in has expired. Sign in with your password, then turn it on again in Settings.')));
+      }
+      throw DomainError(e.message);
+    }
+  }
+
   @override
   Future<void> init() async {
     await db.load();
+    if (api != null) {
+      _fps = await _fpStore.read();
+      _offered = await _fpStore.offered();
+      for (final f in _fps) {
+        if (await api!.hasParked(f.accountId)) _parked.add(f.accountId);
+      }
+    }
     // A session without server tokens (from before sign-in moved to HOLA) must sign in again.
     if (api != null && db.sessionAccountId != null && !await api!.hasSession) {
       db.sessionAccountId = null;
@@ -101,7 +181,13 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
 
   @override
   Future<Account> signIn(String email, String password) async {
-    if (api != null) return _serverSignIn(() => api!.login(normEmail(email), password));
+    if (api != null) {
+      final a = await _serverSignIn(() => api!.login(normEmail(email), password));
+      // A fresh password sign-in replaces this account's kept session. Other
+      // accounts' fingerprint sign-ins stay as they are.
+      if (_parked.remove(a.id)) await api!.forgetParked(a.id);
+      return a;
+    }
     final a = _byEmail(email);
     if (a == null || hashPassword(password, a.salt) != a.passwordHash) throw DomainError(tr('Email or password is incorrect.'), field: 'password');
     if (a.role == Role.salonStaff) throw DomainError(tr('Team members don’t sign in. Your salon manages your appointments on HOLA.'), field: 'email');
@@ -322,7 +408,14 @@ class LocalAuthRepository extends LocalRepository implements AuthRepository {
 
   @override
   Future<void> signOut() async {
-    await api?.logout();
+    // Fingerprint sign-in on: keep the session for the next fingerprint.
+    final id = me?.id;
+    if (api != null && id != null && fingerprintOn(id)) {
+      await api!.parkSession(id);
+      _parked.add(id);
+    } else {
+      await api?.logout();
+    }
     db.sessionAccountId = null;
     db.commit();
     await db.flush();

@@ -3,6 +3,7 @@ import '../../../core/mvvm/repo_view_model.dart';
 import '../../../core/utils/clock.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
+import '../../../core/utils/location.dart';
 import 'customer_lookups.dart';
 
 /// Home tab: next visit, favourites, salons to discover, a visit to review.
@@ -20,7 +21,7 @@ class HomeViewModel extends RepoViewModel with CustomerLookups {
   final EngagementRepository engage;
 
   /// Rates a finished visit; the "How was…?" card then goes away.
-  Future<void> addReview(String appointmentId, int stars, String text) => engage.addReview(appointmentId: appointmentId, stars: stars, text: text);
+  Future<void> addReview(String appointmentId, int stars, String text, List<(String, String)> photos) => engage.addReview(appointmentId: appointmentId, stars: stars, text: text, photos: photos);
 
   List<Appointment> get _mine => me == null ? const [] : bookings.forCustomer(me!.id);
 
@@ -32,6 +33,9 @@ class HomeViewModel extends RepoViewModel with CustomerLookups {
 
   List<Salon> get live => salons.discover();
 
+  /// Running offers at the salons this customer can see.
+  List<ServiceOffer> get offers => offersLive();
+
   /// Salons in the customer's city first (if they set one).
   List<Salon> get nearYou {
     final city = me?.city.trim() ?? '';
@@ -39,7 +43,18 @@ class HomeViewModel extends RepoViewModel with CustomerLookups {
     return salons.discover(city: city);
   }
 
-  List<Salon> get topRated => live.where((s) => salons.rating(s.id).count > 0).take(5).toList();
+  /// Highest rated first (more reviews break a tie); salons without reviews
+  /// yet follow, so the list is there from day one.
+  List<Salon> get topRated {
+    final xs = [...live];
+    int byRating(Salon a, Salon b) {
+      final ra = salons.rating(a.id), rb = salons.rating(b.id);
+      final r = rb.average.compareTo(ra.average);
+      return r != 0 ? r : rb.count.compareTo(ra.count);
+    }
+
+    return (xs..sort(byRating)).take(5).toList();
+  }
 
   List<Salon> get newest => ([...live]..sort((a, b) => b.createdAt.compareTo(a.createdAt))).take(6).toList();
 
@@ -76,7 +91,70 @@ class ExploreViewModel extends RepoViewModel with CustomerLookups {
     notify();
   }
 
-  List<Salon> get results => salons.discover(query: query, category: category, city: city);
+  List<Salon> get results {
+    final xs = salons.discover(query: query, category: category, city: city);
+    if (!nearFirst || here == null) return xs;
+    // Nearest first; salons without a location on the map go last.
+    double key(Salon s) => distanceTo(s) ?? double.infinity;
+    return xs..sort((a, b) => key(a).compareTo(key(b)));
+  }
+
+  // ── near me ──
+
+  /// The phone's position, once the customer asked for salons near them.
+  GeoFix? here;
+  bool nearFirst = false, locating = false, showMap = false;
+
+  /// Kilometres to the salon's nearest branch with a location (null if none).
+  double? distanceTo(Salon s) {
+    final h = here;
+    if (h == null) return null;
+    double? best;
+    for (final b in salons.branches(s.id)) {
+      final at = b.location;
+      if (at == null) continue;
+      final d = distanceKm(h, at);
+      if (best == null || d < best) best = d;
+    }
+    return best;
+  }
+
+  /// Branches of [list] that can be put on the map.
+  List<(Salon, Branch)> pins(List<Salon> list) => [
+    for (final s in list)
+      for (final b in salons.branches(s.id))
+        if (b.location != null) (s, b),
+  ];
+
+  /// Sorts by distance, asking for the phone's location the first time.
+  /// Returns false when the location can't be read (off or refused).
+  Future<bool> toggleNearMe() async {
+    if (nearFirst) {
+      nearFirst = false;
+      notify();
+      return true;
+    }
+    if (!await locate()) return false;
+    nearFirst = true;
+    notify();
+    return true;
+  }
+
+  /// Reads the phone's location (again). False when it can't.
+  Future<bool> locate() async {
+    locating = true;
+    notify();
+    final fix = await Location.read();
+    locating = false;
+    if (fix != null) here = fix;
+    notify();
+    return fix != null;
+  }
+
+  void toggleMap() {
+    showMap = !showMap;
+    notify();
+  }
 
   /// Cities that have at least one live salon.
   List<String> get cities {

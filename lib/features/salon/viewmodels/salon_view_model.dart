@@ -13,7 +13,7 @@ import '../../../domain/services/availability.dart';
 /// member, plus the actions they can take. Page-scoped; stays live through
 /// [RepoViewModel] so a customer's booking appears here straight away.
 class SalonViewModel extends RepoViewModel {
-  SalonViewModel({required this.salons, required this.bookings, required this.engage, required this.field, required this.auth}) : super(salons);
+  SalonViewModel({required this.salons, required this.bookings, required this.engage, required this.field, required this.auth, required this.chat}) : super(salons);
 
   factory SalonViewModel.of(BuildContext c) => SalonViewModel(
     salons: c.read<SalonRepository>(),
@@ -21,6 +21,7 @@ class SalonViewModel extends RepoViewModel {
     engage: c.read<EngagementRepository>(),
     field: c.read<FieldRepository>(),
     auth: c.read<AuthRepository>(),
+    chat: c.read<ChatRepository>(),
   );
 
   final SalonRepository salons;
@@ -28,12 +29,16 @@ class SalonViewModel extends RepoViewModel {
   final EngagementRepository engage;
   final FieldRepository field;
   final AuthRepository auth;
+  final ChatRepository chat;
 
   // ── who / where ──
 
   Account? get me => auth.current;
   bool get isOwner => me?.role == Role.salonOwner;
   Salon? get salon => me?.salonId == null ? null : salons.salon(me!.salonId!);
+
+  /// Minutes before the start that check-in opens (HOLA's booking policy).
+  int get checkInEarlyMin => salon?.checkInEarlyMin ?? 120;
   String get salonId => salon?.id ?? '';
   List<Branch> get branches => salons.branches(salonId);
   Branch? branch(String id) => salons.branch(id);
@@ -89,17 +94,90 @@ class SalonViewModel extends RepoViewModel {
   List<Slot> slots({required String branchId, required List<String> serviceIds, String? staffId, required DateTime day, String? rescheduling}) =>
       bookings.availability(branchId: branchId, serviceIds: serviceIds, staffId: staffId, day: day, rescheduling: rescheduling);
 
-  /// A chat thread with this client, if they have written to the salon.
-  ChatThread? threadWith(String? customerId) => customerId == null ? null : engage.threadsForSalon(salonId).where((t) => t.customerId == customerId).firstOrNull;
+  /// The salon can message this booking's client (an app client, and chat
+  /// reaches them: HOLA's chat is live, or the booking is on this phone).
+  bool canMessage(Appointment a) => a.customerId != null && (chat.live || !a.hola);
+
+  // ── clients ──
+
+  /// Groups bookings by client: their HOLA account, else their phone number
+  /// (a walk-in with the same number as an app client is the same person),
+  /// else their name.
+  Map<String, String> get _accountByPhone => {
+    for (final a in all)
+      if (a.customerId != null && _tel(a.customerPhone).isNotEmpty) _tel(a.customerPhone): a.customerId!,
+  };
+  static String _tel(String p) {
+    final d = p.replaceAll(RegExp(r'\D'), '');
+    return d.length >= 10 ? d.substring(d.length - 10) : d;
+  }
+
+  String _clientKey(Appointment a, Map<String, String> byPhone) {
+    final t = _tel(a.customerPhone);
+    return a.customerId ?? byPhone[t] ?? (t.isNotEmpty ? 'tel:$t' : 'name:${a.customerName.trim().toLowerCase()}');
+  }
+
+  String clientKeyOf(Appointment a) => _clientKey(a, _accountByPhone);
+
+  /// Everyone who has booked or walked in, most recent visit first; [q]
+  /// matches name or phone. HOLA's client list gives the full totals; the
+  /// bookings on this phone add next visit, no-shows and usual services.
+  List<ClientSummary> clients({String q = ''}) {
+    final byPhone = _accountByPhone;
+    final groups = <String, List<Appointment>>{};
+    for (final a in all) {
+      groups.putIfAbsent(_clientKey(a, byPhone), () => []).add(a);
+    }
+    final local = {for (final e in groups.entries) e.key: ClientSummary.of(e.key, e.value, now())};
+    final merged = <String, ClientSummary>{};
+    for (final r in bookings.clientList(salonId)) {
+      final t = _tel(r.phone);
+      final key = r.customerId ?? (t.isNotEmpty ? byPhone[t] ?? 'tel:$t' : 'name:${r.name.trim().toLowerCase()}');
+      merged[key] = ClientSummary.server(key, r, merged[key] ?? local[key]);
+    }
+    for (final e in local.entries) {
+      merged.putIfAbsent(e.key, () => e.value);
+    }
+    final query = q.trim().toLowerCase(), digits = q.replaceAll(RegExp(r'\D'), '');
+    return merged.values.where((c) => query.isEmpty || c.name.toLowerCase().contains(query) || (digits.length >= 3 && c.phone.replaceAll(RegExp(r'\D'), '').contains(digits))).toList()
+      ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+  }
+
+  ClientSummary? client(String key) => clients().where((c) => c.key == key).firstOrNull;
+
+  /// Fetches HOLA's client list.
+  Future<void> loadClients() => bookings.syncClients(salonId);
+
+  /// Fetches every visit of one client from HOLA (an app client's bookings,
+  /// and any walk-ins under their phone number).
+  Future<void> loadHistory(String key) async {
+    final c = client(key);
+    if (key.startsWith('tel:') || key.startsWith('name:')) {
+      await bookings.syncClientHistory(salonId, phone: c?.phone ?? key.substring(4), name: c?.name ?? '');
+      return;
+    }
+    await Future.wait([bookings.syncClientHistory(salonId, customerId: key), if (c != null && c.phone.isNotEmpty) bookings.syncClientHistory(salonId, phone: c.phone)]);
+  }
+
+  /// Every booking of one client at this salon, newest first.
+  List<Appointment> history(String key) {
+    final byPhone = _accountByPhone;
+    return all.where((a) => _clientKey(a, byPhone) == key).toList()..sort((a, b) => b.startsAt.compareTo(a.startsAt));
+  }
+
+  Review? reviewOf(String appointmentId) => engage.reviewForAppointment(appointmentId);
 
   // ── inbox counts ──
 
-  int get unreadMessages => engage.threadsForSalon(salonId).fold(0, (t, x) => t + engage.unread(x.id, asSalon: true));
-  List<Review> get reviews => engage.reviewsForSalon(salonId);
+  int get unreadMessages => chat.unreadTotal;
+
+  /// Every review of the salon, including those HOLA hasn't published yet.
+  List<Review> get reviews => engage.reviewsForSalon(salonId, withPending: true);
   SalonRating get rating => salons.rating(salonId);
   List<Complaint> get feedback => engage.complaintsForSalon(salonId);
   int get openFeedback => feedback.where((c) => c.status == 'OPEN').length;
-  int get unrepliedReviews => reviews.where((r) => r.reply == null).length;
+  int get unrepliedReviews => reviews.where((r) => !r.pending && r.reply == null).length;
+  int get waitingReviews => reviews.where((r) => r.pending).length;
 
   // ── team & leave ──
 
@@ -172,13 +250,33 @@ class SalonViewModel extends RepoViewModel {
   }
 
   Future<void> reply(String reviewId, String text) => engage.replyToReview(reviewId, text);
+  bool get canDeleteReviews => isOwner && engage.reviewDelete;
+  Future<void> deleteReview(String id) => engage.deleteReview(id);
   Future<void> resolve(String complaintId, String text) => engage.resolveComplaint(complaintId, text);
+  // Offers & discounts
+  List<ServiceOffer> get offers => salons.offers(salonId);
+  int get runningOffers => offers.where((o) => o.liveAt(now())).length;
+  Future<void> syncOffers() => salons.syncOffers(salonId: salonId);
+  ({int used, int held}) offerStats(ServiceOffer o) => salons.offerStats(o);
+  Future<void> setOfferActive(String id, bool on) => salons.setOfferActive(id, on);
+  Future<void> deleteOffer(String id) => salons.deleteOffer(id);
+  Future<ServiceOffer> saveOffer({
+    String? id,
+    required String serviceId,
+    required String discountType,
+    required int discountValue,
+    required DateTime startDay,
+    required DateTime lastDay,
+    required bool active,
+  }) => salons.saveOffer(id: id, salonId: salonId, serviceId: serviceId, discountType: discountType, discountValue: discountValue, startDay: startDay, lastDay: lastDay, active: active);
+
   Future<void> setServiceActive(String id, bool on) => salons.setServiceActive(id, on);
   Future<void> deleteService(String id) => salons.deleteService(id);
   Future<void> saveService({String? id, required String name, required String category, required String description, required int price, required int durationMin, required bool active}) =>
       salons.saveService(id: id, salonId: salonId, name: name, category: category, description: description, price: price, durationMin: durationMin, active: active);
   Future<Account> addStaff({required String name, required String phone, required String title}) => salons.addStaff(salonId, name: name, phone: phone, title: title);
-  Future<void> updateStaff(String id, {required String title, required bool bookable, required List<Shift?> week}) => salons.updateStaff(id, title: title, bookable: bookable, week: week);
+  Future<void> updateStaff(String id, {required String title, required bool bookable, required List<Shift?> week, String? branchId}) =>
+      salons.updateStaff(id, title: title, bookable: bookable, week: week, branchId: branchId);
   Future<void> removeStaff(String id) => salons.removeStaff(id);
   Future<void> updatePolicy({required bool autoConfirm, required int cancelWindowHours, required int noShowGraceMin}) =>
       salons.updatePolicy(salonId, autoConfirm: autoConfirm, cancelWindowHours: cancelWindowHours, noShowGraceMin: noShowGraceMin);
@@ -192,6 +290,97 @@ class SalonViewModel extends RepoViewModel {
   Future<void> deleteBranch(String id) => salons.deleteBranch(id);
   Future<Appointment> walkIn({required String branchId, required String name, required String phone, required List<String> serviceIds, required String staffId, required DateTime start}) =>
       bookings.walkIn(salonId: salonId, branchId: branchId, guestName: name, guestPhone: phone, serviceIds: serviceIds, staffId: staffId, start: start);
+}
+
+/// One client's record at this salon, built from their bookings.
+class ClientSummary {
+  final String key, name, phone;
+  final bool hasAccount;
+  final int bookings, completed, noShows, cancelled, spent;
+  final DateTime? lastVisit, firstVisit;
+  final Appointment? next;
+
+  /// For sorting: the last visit, else the newest booking.
+  final DateTime lastSeen;
+
+  /// Services they had most, most frequent first.
+  final List<String> favourites;
+
+  const ClientSummary({
+    required this.key,
+    required this.name,
+    required this.phone,
+    required this.hasAccount,
+    required this.bookings,
+    required this.completed,
+    required this.noShows,
+    required this.cancelled,
+    required this.spent,
+    required this.lastVisit,
+    required this.firstVisit,
+    required this.next,
+    required this.lastSeen,
+    required this.favourites,
+    this.fromServer = false,
+  });
+
+  /// Totals came from HOLA's client list.
+  final bool fromServer;
+
+  /// HOLA's totals for a client, with the extras only bookings can tell
+  /// ([local], built from the bookings on this phone, or another HOLA entry
+  /// for the same person, whose totals are added).
+  factory ClientSummary.server(String key, ClientRecord r, ClientSummary? local) {
+    final sameSource = local != null && local.fromServer;
+    DateTime? pick(DateTime? a, DateTime? b, bool later) => a == null ? b : (b == null ? a : ((later ? a.isAfter(b) : a.isBefore(b)) ? a : b));
+    final last = pick(r.lastVisitAt, local?.lastVisit, true);
+    return ClientSummary(
+      key: key,
+      name: r.name.trim().isNotEmpty ? r.name.trim() : (local?.name ?? tr('Guest')),
+      phone: r.phone.isNotEmpty ? r.phone : (local?.phone ?? ''),
+      hasAccount: r.customerId != null || (local?.hasAccount ?? false),
+      bookings: sameSource ? local.bookings + r.visits : (local == null ? r.visits : (r.visits > local.bookings ? r.visits : local.bookings)),
+      completed: sameSource ? local.completed + r.completedVisits : (local == null ? r.completedVisits : (r.completedVisits > local.completed ? r.completedVisits : local.completed)),
+      noShows: local?.noShows ?? 0,
+      cancelled: local?.cancelled ?? 0,
+      spent: sameSource ? local.spent + r.totalSpent : (local == null ? r.totalSpent : (r.totalSpent > local.spent ? r.totalSpent : local.spent)),
+      lastVisit: last,
+      firstVisit: pick(r.firstVisitAt, local?.firstVisit, false),
+      next: local?.next,
+      lastSeen: last ?? r.lastBookingAt ?? local?.lastSeen ?? DateTime(2000),
+      favourites: local?.favourites ?? const [],
+      fromServer: true,
+    );
+  }
+
+  factory ClientSummary.of(String key, List<Appointment> xs, DateTime at) {
+    final newest = [...xs]..sort((a, b) => b.startsAt.compareTo(a.startsAt));
+    final done = newest.where((a) => a.status == ApptStatus.completed).toList();
+    final upcoming = newest.where((a) => ApptStatus.upcoming.contains(a.status) && a.startsAt.isAfter(at)).toList();
+    final counts = <String, int>{};
+    for (final a in done) {
+      for (final n in a.serviceNames.where((n) => n.isNotEmpty)) {
+        counts[n] = (counts[n] ?? 0) + 1;
+      }
+    }
+    final named = newest.firstWhere((a) => a.customerName.trim().isNotEmpty, orElse: () => newest.first);
+    return ClientSummary(
+      key: key,
+      name: named.customerName.trim().isEmpty ? tr('Guest') : named.customerName.trim(),
+      phone: newest.map((a) => a.customerPhone).firstWhere((p) => p.isNotEmpty, orElse: () => ''),
+      hasAccount: newest.any((a) => a.customerId != null),
+      bookings: newest.length,
+      completed: done.length,
+      noShows: newest.where((a) => a.status == ApptStatus.noShow).length,
+      cancelled: newest.where((a) => a.status == ApptStatus.cancelledByCustomer || a.status == ApptStatus.cancelledBySalon).length,
+      spent: done.fold(0, (t, a) => t + a.price),
+      lastVisit: done.firstOrNull?.startsAt,
+      firstVisit: done.lastOrNull?.startsAt,
+      next: upcoming.lastOrNull,
+      lastSeen: done.firstOrNull?.startsAt ?? newest.first.startsAt,
+      favourites: (counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!))).take(3).toList(),
+    );
+  }
 }
 
 /// Greeting for the time of day.

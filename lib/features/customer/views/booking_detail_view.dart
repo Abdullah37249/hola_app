@@ -15,17 +15,46 @@ import '../viewmodels/bookings_view_models.dart';
 import '../widgets/booking_card.dart';
 import '../widgets/salon_cards.dart';
 import '../widgets/slot_picker.dart';
+import '../widgets/review_photos.dart';
+import 'booking_flow_view.dart';
 import 'feedback_view.dart';
 import 'salon_view.dart';
 
 class BookingDetailPage extends StatelessWidget {
   final String id;
-  const BookingDetailPage({super.key, required this.id});
+
+  /// Opened from a reminder's "Cancel booking" button: asks straight away.
+  final bool askCancel;
+  const BookingDetailPage({super.key, required this.id, this.askCancel = false});
   @override
   Widget build(BuildContext context) => ChangeNotifierProvider(
     create: (c) => BookingDetailViewModel(c.read<SalonRepository>(), c.read<AuthRepository>(), c.read<BookingRepository>(), c.read<EngagementRepository>(), id),
-    child: const _DetailBody(),
+    child: askCancel ? const _AskCancel(child: _DetailBody()) : const _DetailBody(),
   );
+}
+
+/// Opens the cancel question once the page is up (if the visit can still be cancelled).
+class _AskCancel extends StatefulWidget {
+  const _AskCancel({required this.child});
+  final Widget child;
+  @override
+  State<_AskCancel> createState() => _AskCancelState();
+}
+
+class _AskCancelState extends State<_AskCancel> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      if (!mounted) return;
+      final vm = context.read<BookingDetailViewModel>();
+      if (vm.isUpcoming) await const _DetailBody()._cancel(context, vm, vm.s);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 enum _Tl { done, cur, todo, bad }
@@ -52,9 +81,19 @@ class _DetailBody extends StatelessWidget {
         ),
       ];
     }
-    const flow = [ApptStatus.requested, ApptStatus.confirmed, ApptStatus.checkedIn, ApptStatus.completed];
-    final labels = {ApptStatus.requested: tr('Requested'), ApptStatus.confirmed: tr('Confirmed by salon'), ApptStatus.checkedIn: tr('Checked in at salon'), ApptStatus.completed: tr('Completed')};
-    final cur = flow.indexOf(a.status == ApptStatus.inService ? ApptStatus.checkedIn : a.status);
+    // "In service" shows as its own step, like the salon sees it; a visit
+    // completed straight from check-in skips it (it never happened).
+    final started = a.status == ApptStatus.inService || a.event(ApptStatus.inService) != null;
+    final skipped = a.status == ApptStatus.completed && !started;
+    final flow = [ApptStatus.requested, ApptStatus.confirmed, ApptStatus.checkedIn, if (!skipped) ApptStatus.inService, ApptStatus.completed];
+    final labels = {
+      ApptStatus.requested: tr('Requested'),
+      ApptStatus.confirmed: tr('Confirmed by salon'),
+      ApptStatus.checkedIn: tr('Checked in at salon'),
+      ApptStatus.inService: tr('In service'),
+      ApptStatus.completed: tr('Completed'),
+    };
+    final cur = flow.indexOf(a.status);
     return [
       for (final (i, f) in flow.indexed)
         (
@@ -63,6 +102,8 @@ class _DetailBody extends StatelessWidget {
               ? (f == ApptStatus.confirmed && a.event(f)?.byId == 'auto' ? tr('Instantly') : at(f))
               : (f == ApptStatus.checkedIn
                     ? tr('When you arrive')
+                    : f == ApptStatus.inService
+                    ? tr('When your service starts')
                     : f == ApptStatus.completed
                     ? tr('After your service')
                     : tr('Waiting for the salon')),
@@ -94,17 +135,25 @@ class _DetailBody extends StatelessWidget {
     final review = vm.review;
     final complaints = vm.complaints;
     // One clear next step, at the thumb: reschedule, rate, or book again.
+    final again = s != null && s.isListed ? () => pushPage(context, rebookPage(vm.salons, a)) : null;
     final Widget? footer = vm.isUpcoming
         ? HButton(tr('Reschedule'), icon: 'cal', block: true, onTap: () => _reschedule(context, vm, a))
         : vm.canReview
-        ? HButton(tr('Rate your visit'), icon: 'star', block: true, onTap: () => showReviewSheet(context, s?.name ?? tr('the salon'), vm.addReview))
-        : s != null && s.isListed
-        ? HButton(
-            tr('Book again'),
-            icon: 'plus',
-            block: true,
-            onTap: () => pushPage(context, SalonPage(id: s.id)),
+        ? Row(
+            children: [
+              if (again != null) ...[
+                Expanded(
+                  child: HButton(tr('Book again'), icon: 'again', kind: BtnKind.secondary, block: true, onTap: again),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: HButton(tr('Rate your visit'), icon: 'star', block: true, onTap: () => showReviewSheet(context, s?.name ?? tr('the salon'), vm.addReview)),
+              ),
+            ],
           )
+        : again != null
+        ? HButton(tr('Book again'), icon: 'again', block: true, onTap: again)
         : null;
     return HPage(
       title: tr('Booking {code}', {'code': a.code}),
@@ -144,6 +193,7 @@ class _DetailBody extends StatelessWidget {
                 KV(tr('Professional'), vm.personName(a.staffId)),
                 const HDivider(),
                 for (final n in a.serviceNames) Text(n, style: T.sm(context).copyWith(color: c.ink)),
+                if (a.discount > 0) KV(tr('Offer discount'), '−${rs(a.discount)}', vColor: c.ok),
                 const HDivider(),
                 Row(
                   children: [
@@ -175,9 +225,14 @@ class _DetailBody extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                 ],
-                if (s != null && !vm.onServer)
+                if (s != null && (!vm.onServer || context.read<ChatRepository>().live))
                   Expanded(
-                    child: HButton(tr('Message'), icon: 'msg', kind: BtnKind.secondary, onTap: () => openSalonChat(context, s.id)),
+                    child: HButton(
+                      tr('Message'),
+                      icon: 'msg',
+                      kind: BtnKind.secondary,
+                      onTap: () => openChat(context, salonId: s.id, appointmentId: a.id),
+                    ),
                   ),
               ],
             ),
@@ -206,14 +261,22 @@ class _DetailBody extends StatelessWidget {
             if (review != null) ...[
               SecHead(tr('Your review')),
               HCard(child: ReviewTile(review, salonName: s?.name)),
-              if (review.pending)
+              if (review.removed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(tr('Removed by the salon. It no longer shows on their profile.'), style: T.cap(context)),
+                )
+              else if (review.pending)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(tr('HOLA checks every review before it’s public.'), style: T.cap(context)),
                 ),
             ],
-            if (complaints.isNotEmpty) ...[SecHead(tr('Your feedback')), for (final x in complaints) ComplaintCard(x, salonName: s?.name ?? tr('Salon'))],
-            if (s != null && a.status != ApptStatus.requested)
+            if (complaints.isNotEmpty && context.read<EngagementRepository>().complaintsOn) ...[
+              SecHead(tr('Your feedback')),
+              for (final x in complaints) ComplaintCard(x, salonName: s?.name ?? tr('Salon')),
+            ],
+            if (s != null && a.status != ApptStatus.requested && context.read<EngagementRepository>().complaintsOn)
               Center(
                 child: TextButton(
                   onPressed: () => showComplaintSheet(context, salonId: s.id, salonName: s.name, appointmentId: a.id),
@@ -282,8 +345,9 @@ class _DetailBody extends StatelessWidget {
 }
 
 /// The rating sheet: stars and an optional comment, posted with [post].
-Future<void> showReviewSheet(BuildContext context, String salonName, Future<void> Function(int stars, String text) post) async {
+Future<void> showReviewSheet(BuildContext context, String salonName, Future<void> Function(int stars, String text, List<(String, String)> photos) post) async {
   var stars = 0;
+  var photos = <(String, String)>[];
   await showHSheet(
     context,
     (ctx) => Owned<TextEditingController>(
@@ -315,13 +379,14 @@ Future<void> showReviewSheet(BuildContext context, String salonName, Future<void
           ),
           Text([tr('Tap to rate'), tr('Poor'), tr('Fair'), tr('Good'), tr('Very good'), tr('Excellent')][stars], textAlign: TextAlign.center, style: T.ttl(ctx)),
           HField(label: tr('Tell others about your visit (optional)'), controller: text, multiline: true),
+          ReviewPhotoPicker(photos: photos, onChanged: (v) => set(() => photos = v)),
           HButton(
             tr('Post review'),
             block: true,
             onTap: stars == 0
                 ? null
                 : () async {
-                    final ok = await attempt(() => post(stars, text.text), success: tr('Thanks for your review'), icon: 'star', confetti: stars >= 4);
+                    final ok = await attempt(() => post(stars, text.text, photos), success: tr('Thanks for your review'), icon: 'star', confetti: stars >= 4);
                     if (ok && ctx.mounted) Navigator.pop(ctx);
                   },
           ),

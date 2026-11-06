@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:hola_professional/core/network/api.dart';
+import 'package:hola_professional/data/local/fingerprint_store.dart';
 import 'package:hola_professional/data/local/local_auth_repository.dart';
 import 'package:hola_professional/data/local/local_database.dart';
 import 'package:hola_professional/data/local/local_salon_repository.dart';
@@ -31,15 +32,20 @@ class FakeHola {
   final queries = <String, Map<String, String>>{};
   final bodies = <String, Map<String, dynamic>>{};
 
+  int _seq = 0;
   Map<String, dynamic> tokens({bool expired = false}) => {
-    'accessToken': 'a${calls.length}',
+    'accessToken': 'a${++_seq}',
     'accessTokenExpiresAt': (expired ? DateTime.now().subtract(const Duration(minutes: 1)) : DateTime.now().add(const Duration(minutes: 15))).toIso8601String(),
-    'refreshToken': 'r${calls.length}',
+    'refreshToken': 'r$_seq',
     'refreshTokenExpiresAt': DateTime.now().add(const Duration(days: 30)).toIso8601String(),
     'tokenType': 'Bearer',
   };
 
   String? signedIn;
+
+  /// Whose session each refresh token is, and which HOLA has ended.
+  final refreshOwner = <String, String>{};
+  final revoked = <String>{};
 
   http.Response json(Object? body, [int status = 200]) => http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
   http.Response problem(int status, String code, [List<Map<String, String>> errors = const []]) =>
@@ -80,7 +86,9 @@ class FakeHola {
       'startsAt': start.toUtc().toIso8601String(),
       'endsAt': start.add(const Duration(minutes: 90)).toUtc().toIso8601String(),
       'status': status,
-      'items': [{'branchServiceId': 'svc-1', 'name': 'Root colour', 'price': '2500.00', 'durationMin': 90}],
+      'items': [
+        {'branchServiceId': 'svc-1', 'name': 'Root colour', 'price': '2500.00', 'durationMin': 90},
+      ],
       'totalPrice': '2500.00',
       'notes': null,
       'lateCancel': false,
@@ -102,16 +110,37 @@ class FakeHola {
         final u = users[body['email']];
         if (u == null || u.$1 != body['password']) return problem(401, 'INVALID_CREDENTIALS');
         signedIn = body['email'];
-        return json(tokens(expired: accessExpired));
+        final t = tokens(expired: accessExpired);
+        refreshOwner[t['refreshToken'] as String] = body['email'] as String;
+        return json(t);
       case 'POST /auth/register':
         if (users.containsKey(body['email'])) return problem(409, 'EMAIL_TAKEN');
-        if ((body['password'] as String).length < 8) return problem(422, 'VALIDATION_FAILED', [{'path': 'password', 'message': 'Too small'}]);
-        users[body['email']] = (body['password'], {'id': 'cust-${users.length}', 'kind': 'CUSTOMER', 'email': body['email'], 'fullName': body['fullName'], 'phone': body['phone'], 'roles': [], 'createdAt': '2026-11-02T06:00:00Z'});
+        if ((body['password'] as String).length < 8) {
+          return problem(422, 'VALIDATION_FAILED', [
+            {'path': 'password', 'message': 'Too small'},
+          ]);
+        }
+        users[body['email']] = (
+          body['password'],
+          {'id': 'cust-${users.length}', 'kind': 'CUSTOMER', 'email': body['email'], 'fullName': body['fullName'], 'phone': body['phone'], 'roles': [], 'createdAt': '2026-11-02T06:00:00Z'},
+        );
         signedIn = body['email'];
         return json(tokens(), 201);
       case 'POST /auth/register-salon':
         final salon = body['salon'] as Map;
-        users[body['email']] = (body['password'], {'id': 'owner-new', 'kind': 'SALON', 'email': body['email'], 'fullName': body['fullName'], 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+        users[body['email']] = (
+          body['password'],
+          {
+            'id': 'owner-new',
+            'kind': 'SALON',
+            'email': body['email'],
+            'fullName': body['fullName'],
+            'roles': [
+              {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+            ],
+            'createdAt': '2026-11-02T06:00:00Z',
+          },
+        );
         registeredSalon = salon;
         signedIn = body['email'];
         return json(tokens(), 201);
@@ -122,9 +151,22 @@ class FakeHola {
           'branchId': 'br-1',
           'durationMin': 90,
           'totalPrice': '2500.00',
-          'staff': [{'id': 'mem-1', 'fullName': 'Noor Fatima', 'title': 'Senior Stylist'}],
+          'staff': [
+            {'id': 'mem-1', 'fullName': 'Noor Fatima', 'title': 'Senior Stylist'},
+          ],
           'days': [
-            {'date': '2026-11-03', 'closed': false, 'fullyBooked': false, 'slots': [{'start': '2026-11-03T05:00:00.000Z', 'end': '2026-11-03T06:30:00.000Z', 'staffIds': ['mem-1']}]},
+            {
+              'date': '2026-11-03',
+              'closed': false,
+              'fullyBooked': false,
+              'slots': [
+                {
+                  'start': '2026-11-03T05:00:00.000Z',
+                  'end': '2026-11-03T06:30:00.000Z',
+                  'staffIds': ['mem-1'],
+                },
+              ],
+            },
           ],
         });
       case 'POST /appointments':
@@ -134,13 +176,19 @@ class FakeHola {
         appts['ap-1'] = a;
         return json(a, 201);
       case 'GET /me/appointments':
-        return json({'data': appts.values.toList(), 'meta': {'page': 1, 'pageSize': 100, 'total': appts.length, 'totalPages': 1}});
+        return json({
+          'data': appts.values.toList(),
+          'meta': {'page': 1, 'pageSize': 100, 'total': appts.length, 'totalPages': 1},
+        });
       case 'POST /appointments/ap-1/cancel':
         appts['ap-1'] = {...appts['ap-1']!, 'status': 'CANCELLED_BY_CUSTOMER', 'allowedActions': []};
         return json(appts['ap-1']);
       case 'GET /salons/salon-1/appointments':
         final page = int.parse(req.url.queryParameters['page'] ?? '1');
-        return json({'data': [appt('ap-$page', '2026-11-0${page + 2}T06:00:00Z', 'REQUESTED')], 'meta': {'page': page, 'pageSize': 100, 'total': 2, 'totalPages': 2}});
+        return json({
+          'data': [appt('ap-$page', '2026-11-0${page + 2}T06:00:00Z', 'REQUESTED')],
+          'meta': {'page': page, 'pageSize': 100, 'total': 2, 'totalPages': 2},
+        });
       case 'POST /appointments/ap-1/confirm':
         return json({...appt('ap-1', '2026-11-03T06:00:00Z', 'CONFIRMED')});
       case 'PATCH /me':
@@ -165,7 +213,17 @@ class FakeHola {
         ]);
       case 'POST /salons/salon-1/staff':
         if (body.containsKey('email')) return problem(422, 'VALIDATION_FAILED');
-        final m = {'id': 'mem-${team.length + 2}', 'userId': 'u-x', 'fullName': body['fullName'], 'email': null, 'loginEnabled': false, 'title': body['title'], 'bookable': true, 'active': true, 'version': 1};
+        final m = {
+          'id': 'mem-${team.length + 2}',
+          'userId': 'u-x',
+          'fullName': body['fullName'],
+          'email': null,
+          'loginEnabled': false,
+          'title': body['title'],
+          'bookable': true,
+          'active': true,
+          'version': 1,
+        };
         team.add(m);
         return json(m, 201);
       case 'PUT /salons/salon-1/staff/mem-2/schedule':
@@ -185,9 +243,15 @@ class FakeHola {
       case 'PUT /salons/salon-1/branches/br-1/hours':
         return json(body);
       case 'GET /services':
-        return json([{'id': 'cat-1', 'name': 'Root Colour', 'defaultDurationMin': 60}]);
+        return json([
+          {'id': 'cat-1', 'name': 'Root Colour', 'defaultDurationMin': 60},
+        ]);
       case 'POST /salons/salon-1/branches/br-1/services':
-        if ((body['serviceId'] == null) == (body['name'] == null)) return problem(422, 'VALIDATION_FAILED', [{'path': 'name', 'message': 'one of'}]);
+        if ((body['serviceId'] == null) == (body['name'] == null)) {
+          return problem(422, 'VALIDATION_FAILED', [
+            {'path': 'name', 'message': 'one of'},
+          ]);
+        }
         return json({'id': 'svc-2'}, 201);
       case 'GET /salons/salon-1':
         return json({'id': 'salon-1', 'version': 7});
@@ -195,7 +259,9 @@ class FakeHola {
         if (body['version'] != 7) return problem(409, 'VERSION_CONFLICT');
         return json({'id': 'salon-1', 'version': 8});
       case 'GET /salons/salon-1/branches':
-        return json([{'id': 'br-1', 'version': 2}]);
+        return json([
+          {'id': 'br-1', 'version': 2},
+        ]);
       case 'PATCH /salons/salon-1/branches/br-1':
         if (body['version'] != 2) return problem(409, 'VERSION_CONFLICT');
         return json({'id': 'br-1', 'version': 3});
@@ -205,30 +271,83 @@ class FakeHola {
       case 'POST /files':
         return json({'id': 'file-1', 'status': 'PENDING'}, 201);
       case 'PUT /salons/salon-1/photos':
-        return json([for (final (i, id) in (body['fileIds'] as List).indexed) {'id': id, 'url': 'https://test/api/v1/public/files/$id', 'position': i}]);
+        return json([
+          for (final (i, id) in (body['fileIds'] as List).indexed) {'id': id, 'url': 'https://test/api/v1/public/files/$id', 'position': i},
+        ]);
       case 'POST /complaints':
         return json({'id': 'cmp-1', 'code': 'HT-000001', 'status': 'OPEN'}, 201);
       case 'GET /complaints':
-        return json({'data': [{'id': 'cmp-1', 'subject': 'Waiting time', 'status': 'OPEN', 'raisedBy': {'id': 'c1', 'fullName': 'Mariam'}, 'salon': {'id': 'salon-1', 'name': 'Shape Salon'}, 'createdAt': '2026-11-02T06:00:00Z'}], 'meta': {'page': 1, 'totalPages': 1}});
+        return json({
+          'data': [
+            {
+              'id': 'cmp-1',
+              'subject': 'Waiting time',
+              'status': 'OPEN',
+              'raisedBy': {'id': 'c1', 'fullName': 'Mariam'},
+              'salon': {'id': 'salon-1', 'name': 'Shape Salon'},
+              'createdAt': '2026-11-02T06:00:00Z',
+            },
+          ],
+          'meta': {'page': 1, 'totalPages': 1},
+        });
       case 'GET /complaints/cmp-1':
-        return json({'id': 'cmp-1', 'description': 'Waited 30 minutes past my time.', 'appointmentId': null, 'resolution': null, 'messages': [{'id': 'm1', 'author': {'id': 'owner-1', 'fullName': 'Noor', 'staff': false}, 'body': 'Sorry, we added a stylist.', 'internal': false}]});
+        return json({
+          'id': 'cmp-1',
+          'description': 'Waited 30 minutes past my time.',
+          'appointmentId': null,
+          'resolution': null,
+          'messages': [
+            {
+              'id': 'm1',
+              'author': {'id': 'owner-1', 'fullName': 'Noor', 'staff': false},
+              'body': 'Sorry, we added a stylist.',
+              'internal': false,
+            },
+          ],
+        });
       case 'POST /complaints/cmp-1/messages':
         return json({'id': 'm2'}, 201);
       case 'GET /reviews':
-        return json({'data': [{'id': 'rev-9', 'appointment': {'id': 'ap-5'}, 'salon': {'id': 'salon-1'}, 'customer': {'id': 'c1', 'fullName': 'Mariam'}, 'rating': 5, 'comment': 'Great', 'status': 'PUBLISHED', 'salonReply': null, 'version': 2, 'createdAt': '2026-11-01T06:00:00Z'}]});
+        return json({
+          'data': [
+            {
+              'id': 'rev-9',
+              'appointment': {'id': 'ap-5'},
+              'salon': {'id': 'salon-1'},
+              'customer': {'id': 'c1', 'fullName': 'Mariam'},
+              'rating': 5,
+              'comment': 'Great',
+              'status': 'PUBLISHED',
+              'salonReply': null,
+              'version': 2,
+              'createdAt': '2026-11-01T06:00:00Z',
+            },
+          ],
+        });
       case 'POST /reviews/rev-9/reply':
         if (body['version'] != 2) return problem(409, 'VERSION_CONFLICT');
         return json({'id': 'rev-9'});
       case 'POST /auth/refresh':
         refreshes++;
-        return json(tokens());
+        final old = body['refreshToken'] as String?;
+        if (revoked.contains(old)) return problem(401, 'UNAUTHENTICATED');
+        final who = refreshOwner[old];
+        if (who != null) signedIn = who;
+        final t = tokens();
+        if (who != null) refreshOwner[t['refreshToken'] as String] = who;
+        return json(t);
       case 'POST /auth/logout':
         return http.Response('', 204);
       case 'GET /me':
         return json(users[signedIn]!.$2);
       case 'GET /me/salons':
         return json([
-          {'salon': {'id': 'salon-1', 'code': 'HS-000001', 'name': 'Shape Salon', 'status': 'ACTIVE', 'city': 'Lahore', 'phone': '+92 300 1234567'}, 'role': 'SALON_OWNER', 'branchIds': [], 'permissions': []},
+          {
+            'salon': {'id': 'salon-1', 'code': 'HS-000001', 'name': 'Shape Salon', 'status': 'ACTIVE', 'city': 'Lahore', 'phone': '+92 300 1234567'},
+            'role': 'SALON_OWNER',
+            'branchIds': [],
+            'permissions': [],
+          },
         ]);
       case 'GET /discover/salons':
         return json({
@@ -267,7 +386,9 @@ class FakeHola {
           'services': [
             {'id': 'svc-1', 'name': 'Root colour', 'category': 'Colour', 'price': '2500.00', 'durationMin': 90},
           ],
-          'staff': [{'id': 'mem-1', 'fullName': 'Noor Fatima', 'title': 'Senior Stylist', 'specialties': [], 'avatarFileId': null}],
+          'staff': [
+            {'id': 'mem-1', 'fullName': 'Noor Fatima', 'title': 'Senior Stylist', 'specialties': [], 'avatarFileId': null},
+          ],
         });
       case 'PUT /me/favourites/salon-1':
         return http.Response('', 204);
@@ -314,7 +435,20 @@ void main() {
   });
 
   test('sign-in is checked by the server; phone-only accounts no longer work', () async {
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor Fatima', 'phone': null, 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor Fatima',
+        'phone': null,
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     final a = await auth.signIn('noor@salon.pk', pw);
     expect(a.role, Role.salonOwner);
     expect(a.salonId, 'salon-1');
@@ -327,8 +461,32 @@ void main() {
   });
 
   test('HOLA staff map to the officer and rider experiences', () async {
-    hola.users['officer@hola.pk'] = (pw, {'id': 'emp-1', 'kind': 'EMPLOYEE', 'email': 'officer@hola.pk', 'fullName': 'Bilal Ahmed', 'roles': [{'role': 'SALES_OFFICER', 'scopeId': null, 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
-    hola.users['admin@hola.pk'] = (pw, {'id': 'emp-2', 'kind': 'EMPLOYEE', 'email': 'admin@hola.pk', 'fullName': 'Admin', 'roles': [{'role': 'SUPER_ADMIN', 'scopeId': null, 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['officer@hola.pk'] = (
+      pw,
+      {
+        'id': 'emp-1',
+        'kind': 'EMPLOYEE',
+        'email': 'officer@hola.pk',
+        'fullName': 'Bilal Ahmed',
+        'roles': [
+          {'role': 'SALES_OFFICER', 'scopeId': null, 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
+    hola.users['admin@hola.pk'] = (
+      pw,
+      {
+        'id': 'emp-2',
+        'kind': 'EMPLOYEE',
+        'email': 'admin@hola.pk',
+        'fullName': 'Admin',
+        'roles': [
+          {'role': 'SUPER_ADMIN', 'scopeId': null, 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     expect((await auth.signIn('officer@hola.pk', pw)).role, Role.salesOfficer);
     await auth.signOut();
     await expectLater(auth.signIn('admin@hola.pk', pw), throwsA(isA<DomainError>()));
@@ -366,7 +524,15 @@ void main() {
   });
 
   test('a salon signs up in the app and is live on HOLA at once', () async {
-    final a = await auth.signUp(role: Role.salonOwner, name: 'Noor Fatima', email: 'noor@salon.pk', phone: '0300 1112233', password: pw, city: 'Lahore', salon: const SalonDraft(name: 'Shape Salon', address: '12 Main Blvd', area: 'Gulberg'));
+    final a = await auth.signUp(
+      role: Role.salonOwner,
+      name: 'Noor Fatima',
+      email: 'noor@salon.pk',
+      phone: '0300 1112233',
+      password: pw,
+      city: 'Lahore',
+      salon: const SalonDraft(name: 'Shape Salon', address: '12 Main Blvd', area: 'Gulberg'),
+    );
     expect(hola.calls, containsAllInOrder(['POST /auth/register-salon', 'GET /me', 'GET /me/salons', 'GET /discover/salons/salon-1']));
     expect(hola.registeredSalon!['name'], 'Shape Salon');
     expect((hola.registeredSalon!['mainBranch'] as Map)['city'], 'Lahore');
@@ -375,7 +541,10 @@ void main() {
     expect(salons.branches('salon-1').single.address, '12 Main Blvd');
     // A salon needs its name.
     await auth.signOut();
-    await expectLater(auth.signUp(role: Role.salonOwner, name: 'Rabia', email: 'r@x.pk', phone: '0300 1112233', password: pw, city: 'Lahore'), throwsA(isA<DomainError>().having((e) => e.field, 'field', 'salonName')));
+    await expectLater(
+      auth.signUp(role: Role.salonOwner, name: 'Rabia', email: 'r@x.pk', phone: '0300 1112233', password: pw, city: 'Lahore'),
+      throwsA(isA<DomainError>().having((e) => e.field, 'field', 'salonName')),
+    );
   });
 
   test('a customer books a HOLA salon on the server, sees it, and cancels it', () async {
@@ -405,14 +574,30 @@ void main() {
     await auth.signIn('m@x.pk', pw);
     await salons.syncDirectory();
     hola.slotTaken = true;
-    await expectLater(bookings.book(salonId: 'salon-1', branchId: 'br-1', serviceIds: ['svc-1'], start: DateTime.parse('2026-11-03T05:00:00Z').toLocal()), throwsA(isA<DomainError>().having((e) => e.message, 'message', contains('took that time'))));
+    await expectLater(
+      bookings.book(salonId: 'salon-1', branchId: 'br-1', serviceIds: ['svc-1'], start: DateTime.parse('2026-11-03T05:00:00Z').toLocal()),
+      throwsA(isA<DomainError>().having((e) => e.message, 'message', contains('took that time'))),
+    );
     hola.appts['ap-9'] = hola.appt('ap-9', '2026-11-04T06:00:00Z', 'CONFIRMED');
     await bookings.sync();
     expect(bookings.appointment('ap-9')!.status, ApptStatus.confirmed);
   });
 
   test('salon calendar asks with ISO date-times and reads every page', () async {
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor', 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z', 'version': 3});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor',
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+        'version': 3,
+      },
+    );
     await auth.signIn('noor@salon.pk', pw);
     await bookings.sync();
     final q = hola.queries['/salons/salon-1/appointments']!;
@@ -454,7 +639,19 @@ void main() {
   });
 
   test('a HOLA salon’s hours, owner stylist and catalogue services are saved on the server', () async {
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor', 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor',
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     await auth.signIn('noor@salon.pk', pw);
     // Signing in makes the owner the first bookable stylist and loads the team.
     expect(hola.ownerBookable, isTrue);
@@ -479,7 +676,9 @@ void main() {
     expect(hola.bodies['PATCH /salons/salon-1/branches/br-1']!['version'], 2);
     // Photos: an existing HOLA photo keeps its id; the list is replaced in order.
     await salons.setSalonPhotos('salon-1', ['https://test/api/v1/public/files/old-1']);
-    expect(hola.bodies['PUT /salons/salon-1/photos'], {'fileIds': ['old-1']});
+    expect(hola.bodies['PUT /salons/salon-1/photos'], {
+      'fileIds': ['old-1'],
+    });
     expect(salons.salon('salon-1')!.cover, 'https://test/api/v1/public/files/old-1');
     // A team member by name only: no email, bookable, given the opening hours.
     final ayesha = await salons.addStaff('salon-1', name: 'Ayesha Malik', title: 'Stylist');
@@ -490,6 +689,9 @@ void main() {
   });
 
   test('complaints and review replies go through the server', () async {
+    // HOLA removed complaints in 0.30.0; this keeps the server path covered.
+    LocalEngagementRepository.complaintsLive = true;
+    addTearDown(() => LocalEngagementRepository.complaintsLive = false);
     hola.users['m@x.pk'] = (pw, {'id': 'c1', 'kind': 'CUSTOMER', 'email': 'm@x.pk', 'fullName': 'Mariam', 'roles': [], 'createdAt': '2026-11-02T06:00:00Z'});
     await auth.signIn('m@x.pk', pw);
     await salons.syncDirectory();
@@ -500,7 +702,19 @@ void main() {
     expect(engage.complaintsForCustomer('c1').single.response, 'Sorry, we added a stylist.');
     await auth.signOut();
 
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor', 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor',
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     await auth.signIn('noor@salon.pk', pw);
     await engage.sync();
     await engage.resolveComplaint('cmp-1', 'We are sorry, it will not happen again.');
@@ -511,7 +725,19 @@ void main() {
   });
 
   test('a photo uploads in two steps with matching type and size', () async {
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor', 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor',
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     hola.calls.clear();
     await api.login('noor@salon.pk', pw);
     final id = await api.uploadFile(List.filled(1234, 7), contentType: 'image/jpeg', purpose: 'salon_photo', fileName: 'front.jpg');
@@ -521,7 +747,19 @@ void main() {
   });
 
   test('saving hours twice in a row works (fresh version each time); empty address fields aren’t sent', () async {
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor', 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor',
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     await auth.signIn('noor@salon.pk', pw);
     final week = [for (var i = 0; i < 7; i++) i == 6 ? null : const Shift(11 * 60, 19 * 60)];
     await salons.updateStaff('mem-1', title: 'Owner', bookable: true, week: week);
@@ -535,7 +773,19 @@ void main() {
   test('the owner never ends up bookable with no working hours', () async {
     // A salon set up before opening hours: the owner was bookable but had no shifts.
     hola.ownerBookable = true;
-    hola.users['noor@salon.pk'] = (pw, {'id': 'owner-1', 'kind': 'SALON', 'email': 'noor@salon.pk', 'fullName': 'Noor', 'roles': [{'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []}], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['noor@salon.pk'] = (
+      pw,
+      {
+        'id': 'owner-1',
+        'kind': 'SALON',
+        'email': 'noor@salon.pk',
+        'fullName': 'Noor',
+        'roles': [
+          {'role': 'SALON_OWNER', 'scopeId': 'salon-1', 'branchIds': []},
+        ],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
     await auth.signIn('noor@salon.pk', pw);
     expect(hola.ownerShifts, isNotEmpty); // repaired with the opening hours
     expect(hola.ownerShifts.every((s) => s['branchId'] == 'br-1'), isTrue);
@@ -557,5 +807,76 @@ void main() {
     final n = engage.notifications().firstWhere((n) => n.title == 'Booking confirmed');
     expect(n.args['salon'], 'Shape Salon');
     expect(n.link?.id, 'ap-1');
+  });
+
+  test('fingerprint sign-in is kept per account; password sign-in still switches accounts', () async {
+    final fp = MemoryFingerprintStore();
+    final store = MemoryTokenStore();
+    api = HolaApi(client: hola.client, tokens: store, base: 'https://test/api/v1');
+    auth = LocalAuthRepository(db, api: api, fingerprints: fp);
+    await auth.init();
+    hola.users['m@x.pk'] = (pw, {'id': 'c1', 'kind': 'CUSTOMER', 'email': 'm@x.pk', 'fullName': 'Mariam Khan', 'roles': [], 'createdAt': '2026-11-02T06:00:00Z'});
+    hola.users['r@hola.pk'] = (
+      pw,
+      {
+        'id': 'rd1',
+        'kind': 'EMPLOYEE',
+        'email': 'r@hola.pk',
+        'fullName': 'Arslan',
+        'roles': [
+          {'role': 'DELIVERY_RIDER', 'scopeId': null, 'branchIds': []},
+        ],
+        'permissions': ['deliveries.own'],
+        'createdAt': '2026-11-02T06:00:00Z',
+      },
+    );
+
+    // Customer turns it on and signs out: the session is kept, not ended.
+    await auth.signIn('m@x.pk', pw);
+    await auth.enableFingerprint();
+    hola.calls.clear();
+    await auth.signOut();
+    expect(hola.calls, isNot(contains('POST /auth/logout')));
+    expect(auth.resumable.map((f) => f.accountId), ['c1']);
+
+    // The rider signs in with a password on the same phone; the customer's
+    // fingerprint sign-in is untouched. The rider turns theirs on too.
+    final rider = await auth.signIn('r@hola.pk', pw);
+    expect(rider.role, Role.rider);
+    expect(auth.fingerprintOn('c1'), isTrue);
+    await auth.enableFingerprint();
+    await auth.signOut();
+    expect(auth.resumable.map((f) => f.accountId).toSet(), {'c1', 'rd1'});
+    expect(auth.resumable.firstWhere((f) => f.accountId == 'rd1').role, 'rider');
+
+    // Each fingerprint brings back its own account.
+    expect((await auth.resumeWithFingerprint('c1')).id, 'c1');
+    expect(auth.resumable, isEmpty); // someone is signed in
+    await auth.signOut();
+    expect((await auth.resumeWithFingerprint('rd1')).id, 'rd1');
+    await auth.signOut();
+
+    // Survives a restart of the app.
+    final again = LocalAuthRepository(
+      db,
+      api: HolaApi(client: hola.client, tokens: store, base: 'https://test/api/v1'),
+      fingerprints: fp,
+    );
+    await again.init();
+    expect(again.resumable.length, 2);
+
+    // Turning one off leaves the other.
+    await auth.resumeWithFingerprint('c1');
+    await auth.disableFingerprint();
+    await auth.signOut();
+    expect(hola.calls.last, 'POST /auth/logout'); // off: a real sign-out
+    expect(auth.resumable.map((f) => f.accountId), ['rd1']);
+
+    // HOLA ended the rider's session: fingerprint asks for the password again.
+    hola.revoked.add((await store.readParked('rd1'))!.refresh);
+    await expectLater(auth.resumeWithFingerprint('rd1'), throwsA(isA<DomainError>()));
+    expect(auth.fingerprintOn('rd1'), isFalse);
+    expect(auth.resumable, isEmpty);
+    expect(auth.current, isNull);
   });
 }

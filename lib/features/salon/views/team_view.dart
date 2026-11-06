@@ -195,6 +195,7 @@ class _MemberState extends State<_Member> {
   late final title = TextEditingController(text: p?.title ?? '');
   late bool bookable = p?.bookable ?? true;
   late List<Shift?> week = [...?p?.week];
+  late String? branchId = p?.branchId ?? vm.branches.firstOrNull?.id;
 
   @override
   void dispose() {
@@ -224,7 +225,7 @@ class _MemberState extends State<_Member> {
                 block: true,
                 onTap: () async {
                   final ok = await attempt(
-                    () => vm.updateStaff(widget.id, title: title.text, bookable: bookable, week: week),
+                    () => vm.updateStaff(widget.id, title: title.text, bookable: bookable, week: week, branchId: branchId),
                     success: tr('Saved'),
                   );
                   if (ok && context.mounted) popPage(context);
@@ -265,6 +266,15 @@ class _MemberState extends State<_Member> {
               ),
             ],
           ),
+          // Several branches: where this person works (and takes bookings).
+          if (vm.branches.length > 1) ...[
+            const SizedBox(height: 20),
+            SecHead(tr('Works at')),
+            const SizedBox(height: 10),
+            ChipRow(
+              children: [for (final b in vm.branches) HChip(b.name, icon: 'store', on: branchId == b.id, onTap: vm.isOwner ? () => setState(() => branchId = b.id) : null)],
+            ),
+          ],
           const SizedBox(height: 20),
           SecHead(tr('Weekly hours')),
           const SizedBox(height: 4),

@@ -4,6 +4,7 @@ export 'engagement.dart';
 export 'field.dart';
 export 'geo.dart';
 export 'json.dart' show Json;
+export 'returns.dart';
 export 'salon.dart';
 export 'status.dart';
 export 'trade.dart';

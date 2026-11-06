@@ -24,17 +24,27 @@ void main() {
     darkTheme: buildTheme(true),
     themeMode: dark ? ThemeMode.dark : ThemeMode.light,
     builder: (context, c) => FxHost(child: c!),
-    home: Scaffold(body: SafeArea(child: Padding(padding: const EdgeInsets.all(16), child: child))),
+    home: Scaffold(
+      body: SafeArea(
+        child: Padding(padding: const EdgeInsets.all(16), child: child),
+      ),
+    ),
   );
 
   testWidgets('AsyncBody: placeholders, then error with retry, then content', (tester) async {
     var loading = true, hasData = false, retries = 0;
     Object? error;
     late StateSetter set;
-    await tester.pumpWidget(host(StatefulBuilder(builder: (context, s) {
-      set = s;
-      return AsyncBody(loading: loading, hasData: hasData, error: error, onRetry: () async => retries++, builder: (_) => const Text('Content'));
-    })));
+    await tester.pumpWidget(
+      host(
+        StatefulBuilder(
+          builder: (context, s) {
+            set = s;
+            return AsyncBody(loading: loading, hasData: hasData, error: error, onRetry: () async => retries++, builder: (_) => const Text('Content'));
+          },
+        ),
+      ),
+    );
     expect(find.byType(SkeletonList), findsOneWidget);
 
     // The shimmer and the error icon animate forever, so step time instead of settling.
@@ -58,10 +68,17 @@ void main() {
   testWidgets('a button ignores taps while its action is running', (tester) async {
     var runs = 0;
     final done = Completer<void>();
-    await tester.pumpWidget(host(HButton('Save', onTap: () {
-      runs++;
-      return done.future;
-    })));
+    await tester.pumpWidget(
+      host(
+        HButton(
+          'Save',
+          onTap: () {
+            runs++;
+            return done.future;
+          },
+        ),
+      ),
+    );
     await tester.tap(find.text('Save'));
     await tester.pump();
     await tester.tap(find.text('Save'), warnIfMissed: false);
@@ -81,15 +98,19 @@ void main() {
       addTearDown(tester.view.reset);
       NetworkStatus.online.value = false;
       addTearDown(() => NetworkStatus.online.value = true);
-      await tester.pumpWidget(host(
-        dark: dark,
-        Column(children: [
-          const SizedBox(height: 40),
-          const SkeletonList(count: 2),
-          const SizedBox(height: 16),
-          LoadError(onRetry: () async {}),
-        ]),
-      ));
+      await tester.pumpWidget(
+        host(
+          dark: dark,
+          Column(
+            children: [
+              const SizedBox(height: 40),
+              const SkeletonList(count: 2),
+              const SizedBox(height: 16),
+              LoadError(onRetry: () async {}),
+            ],
+          ),
+        ),
+      );
       for (var i = 0; i < 9; i++) {
         await tester.pump(const Duration(milliseconds: 100)); // entrances and banner in, shimmer mid-sweep
       }

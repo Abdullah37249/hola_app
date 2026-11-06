@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../../app/viewmodels/session_view_model.dart';
 import '../../../core/utils/sfx.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
@@ -50,6 +51,7 @@ class _SignUpState extends State<_SignUp> {
   Future<void> _submit(SignUpViewModel vm) async {
     FocusScope.of(context).unfocus();
     final nav = Navigator.of(context);
+    final session = context.read<SessionViewModel>();
     final ok = await attempt(
       () => vm.submit(
         name: name.text,
@@ -66,6 +68,7 @@ class _SignUpState extends State<_SignUp> {
     Sfx.success();
     Fx.confetti();
     Fx.toast(tr('Welcome to HOLA, {name}', {'name': name.text.trim().split(' ').first}));
+    session.passwordSignedIn(); // offer fingerprint sign-in for the new account
   }
 
   @override

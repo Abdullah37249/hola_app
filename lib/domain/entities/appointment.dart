@@ -41,6 +41,11 @@ class Appointment {
   /// Last moment to cancel without it counting as late (from the server).
   final DateTime? freeCancelUntil;
 
+  /// Salon offers this booking uses ([price] is after their [discount]).
+  /// Open bookings hold them; a completed one spends them; a cancelled one frees them.
+  final List<String> offerIds;
+  final int discount;
+
   Appointment({
     required this.id,
     required this.code,
@@ -64,6 +69,8 @@ class Appointment {
     this.hola = false,
     this.version = 0,
     this.freeCancelUntil,
+    this.offerIds = const [],
+    this.discount = 0,
   }) : history = history ?? [];
 
   DateTime get endsAt => startsAt.add(Duration(minutes: durationMin));
@@ -93,6 +100,8 @@ class Appointment {
     'hola': hola,
     'version': version,
     'freeCancelUntil': iso(freeCancelUntil),
+    if (offerIds.isNotEmpty) 'offerIds': offerIds,
+    if (discount > 0) 'discount': discount,
   };
 
   factory Appointment.fromJson(Json j) => Appointment(
@@ -118,6 +127,8 @@ class Appointment {
     hola: j['hola'] ?? false,
     version: asInt(j['version']),
     freeCancelUntil: dt(j['freeCancelUntil']),
+    offerIds: strs(j['offerIds']),
+    discount: asInt(j['discount']),
   );
 }
 
@@ -128,4 +139,19 @@ extension _LastWhere<T> on List<T> {
     }
     return null;
   }
+}
+
+/// One client in HOLA's client list for a salon (GET /salons/{id}/clients).
+/// Walk-ins have no [customerId]; HOLA groups them by phone, else by name.
+class ClientRecord {
+  final String? customerId;
+  final String name, phone;
+  final int visits, completedVisits, totalSpent;
+
+  /// Completed visits only (null when there is none yet).
+  final DateTime? firstVisitAt, lastVisitAt;
+
+  /// Newest booking of any status, for sorting.
+  final DateTime? lastBookingAt;
+  const ClientRecord({this.customerId, required this.name, this.phone = '', this.visits = 0, this.completedVisits = 0, this.totalSpent = 0, this.firstVisitAt, this.lastVisitAt, this.lastBookingAt});
 }

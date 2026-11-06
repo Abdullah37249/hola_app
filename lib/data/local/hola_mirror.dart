@@ -57,10 +57,17 @@ Future<Salon> mirrorDiscoverSalon(LocalDatabase db, HolaApi api, J j, {String ow
       if (p['url'] is String) p['url'] as String,
   ];
   s.photos = photos.isNotEmpty ? photos : [if (j['coverUrl'] is String) j['coverUrl'] as String];
+  // Published reviews only (contract 0.18.0).
+  if (j.containsKey('ratingCount')) {
+    s.ratingCount = asInt(j['ratingCount']);
+    s.ratingAverage = double.tryParse('${j['ratingAverage'] ?? ''}');
+  }
   final onMenu = <String>{};
   var menusLoaded = true;
+  final liveBranches = <String>{};
   for (final b in (j['branches'] as List? ?? const []).cast<J>()) {
     final bid = b['id'] as String;
+    liveBranches.add(bid);
     final hours = List<Shift?>.filled(7, null);
     for (final h in (b['hours'] as List? ?? const []).cast<J>()) {
       if (h['closed'] == true || h['opens'] == null || h['closes'] == null) continue;
@@ -112,9 +119,11 @@ Future<Salon> mirrorDiscoverSalon(LocalDatabase db, HolaApi api, J j, {String ow
         mirrorPerson(db, pid, p['fullName'] as String? ?? '', salonId: id);
         final prof = db.staff.where((x) => x.accountId == pid).firstOrNull;
         if (prof == null) {
-          db.staff.add(StaffProfile(accountId: pid, salonId: id, title: p['title'] as String? ?? '', week: [...hours], createdAt: now()));
+          db.staff.add(StaffProfile(accountId: pid, salonId: id, title: p['title'] as String? ?? '', week: [...hours], createdAt: now(), branchId: bid));
         } else {
-          prof.title = p['title'] as String? ?? prof.title;
+          prof
+            ..title = p['title'] as String? ?? prof.title
+            ..branchId = bid; // takes bookings at this branch
         }
       }
     } catch (_) {
@@ -122,6 +131,9 @@ Future<Salon> mirrorDiscoverSalon(LocalDatabase db, HolaApi api, J j, {String ow
       menusLoaded = false;
     }
   }
+  // Branches HOLA doesn't have (deleted there, or made only on this phone by
+  // an older version) go: saving them would fail. The rider's delivery stop stays.
+  if (liveBranches.isNotEmpty) db.branches.removeWhere((b) => b.salonId == id && !liveBranches.contains(b.id) && !b.id.endsWith('~delivery'));
   // Drop services the server no longer offers (deleted there, or copies that
   // never reached it), so nobody can pick them and the booking fail. Hidden
   // services stay: the salon still sees and can switch them back on.
@@ -131,7 +143,8 @@ Future<Salon> mirrorDiscoverSalon(LocalDatabase db, HolaApi api, J j, {String ow
 
 /// Upserts one appointment from the server (the shape POST /appointments and
 /// GET /me/appointments return).
-Appointment mirrorAppointment(LocalDatabase db, J j) {
+/// [actor]: who made the change, when it was made on this phone.
+Appointment mirrorAppointment(LocalDatabase db, J j, {String? actor}) {
   final salon = j['salon'] as Map? ?? const {};
   final branch = j['branch'] as Map? ?? const {};
   final customer = j['customer'] as Map? ?? const {};
@@ -171,15 +184,33 @@ Appointment mirrorAppointment(LocalDatabase db, J j) {
     hola: true,
     version: asInt(j['version']),
     freeCancelUntil: DateTime.tryParse(j['freeCancelUntil'] as String? ?? '')?.toLocal(),
+    // Contract 0.20.0: the server applies offers; each item says which.
+    offerIds: [
+      for (final i in items)
+        if ((i['offer'] as Map?)?['id'] case final id?) '$id',
+    ],
+    discount: items.fold(0, (t, i) => t + money(i['discount'])),
   );
   final i = db.appointments.indexWhere((x) => x.id == a.id);
-  if (i < 0) {
-    db.appointments.add(a);
-  } else {
-    a.reviewed = db.appointments[i].reviewed;
-    a.history.addAll(db.appointments[i].history);
-    db.appointments[i] = a;
+  final prev = i < 0 ? null : db.appointments[i];
+  if (prev != null) {
+    a.reviewed = prev.reviewed;
+    a.history.addAll(prev.history);
   }
+  // HOLA sends the current status only, so the timeline is built from what
+  // this phone has seen: the request, then each status change it learns of.
+  if (a.history.isEmpty) {
+    // Made by the salon (source SALON): confirmed from the start.
+    final bySalon = '${j['source'] ?? ''}'.toUpperCase() == 'SALON';
+    a.history.add(StatusEvent(bySalon ? ApptStatus.confirmed : ApptStatus.requested, a.createdAt, bySalon ? (actor ?? '') : (a.customerId ?? ''), bySalon && a.customerId == null ? 'Walk-in' : null));
+  }
+  if (a.history.last.status != a.status && prev?.status != a.status) {
+    final at = DateTime.tryParse(j['updatedAt'] as String? ?? '')?.toLocal() ?? now();
+    final by = actor ?? (a.status == ApptStatus.cancelledByCustomer ? (a.customerId ?? '') : '');
+    final reason = (j['cancelReason'] as String?)?.trim();
+    a.history.add(StatusEvent(a.status, at.isBefore(a.history.last.at) ? a.history.last.at : at, by, reason == null || reason.isEmpty ? null : reason));
+  }
+  i < 0 ? db.appointments.add(a) : db.appointments[i] = a;
   return a;
 }
 
@@ -192,4 +223,33 @@ GeoFix? branchGeo(Map b) {
   if (lat == null || lng == null) return null;
   final la = double.tryParse('$lat'), ln = double.tryParse('$lng');
   return la == null || ln == null ? null : GeoFix(la, ln);
+}
+
+/// Upserts one offer from HOLA (a salon's list or GET /discover/offers).
+ServiceOffer mirrorOffer(LocalDatabase db, J j) {
+  final svc = j['service'] as Map? ?? const {};
+  final salon = j['salon'] as Map?;
+  final salonId = '${j['salonId'] ?? salon?['id'] ?? ''}';
+  final o = ServiceOffer(
+    id: j['id'] as String,
+    salonId: salonId,
+    serviceId: '${svc['id'] ?? j['serviceId'] ?? ''}',
+    discountType: '${j['discountType'] ?? DiscountType.percent}'.toUpperCase(),
+    discountValue: money(j['discountValue']),
+    startsAt: DateTime.parse(j['startsAt'] as String).toLocal(),
+    endsAt: DateTime.parse(j['endsAt'] as String).toLocal(),
+    active: j['active'] != false,
+    createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '')?.toLocal() ?? now(),
+    hola: true,
+    version: asInt(j['version']),
+    serviceName: svc['name'] as String? ?? '',
+    servicePrice: money(svc['price']),
+    usedCount: asInt(j['usedCount']),
+    reservedCount: asInt(j['reservedCount']),
+    myUse: '${j['myUsage'] ?? OfferUse.none}'.toUpperCase(),
+    heldOn: '${j['reservedOn'] ?? ''}',
+  );
+  final i = db.offers.indexWhere((x) => x.id == o.id);
+  i < 0 ? db.offers.add(o) : db.offers[i] = o;
+  return o;
 }

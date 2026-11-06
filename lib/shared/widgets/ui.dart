@@ -602,10 +602,11 @@ class Seg extends StatelessWidget {
             height: 36,
             child: Stack(
               children: [
-                AnimatedPositioned(
+                // Directional, so the highlight follows the option in Urdu (right to left).
+                AnimatedPositionedDirectional(
                   duration: const Duration(milliseconds: 300),
                   curve: kSpring,
-                  left: w * i,
+                  start: w * i,
                   top: 0,
                   bottom: 0,
                   width: w,
@@ -677,7 +678,7 @@ class HSwitch extends StatelessWidget {
       child: AnimatedAlign(
         duration: const Duration(milliseconds: 300),
         curve: kSpring,
-        alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: on ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
         child: Container(
           width: 24,
           height: 24,
@@ -1051,19 +1052,25 @@ class KV extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(k, style: T.sm(context).copyWith(color: context.c.muted)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            v,
-            textAlign: TextAlign.right,
-            style: T.sm(context).copyWith(color: vColor ?? context.c.ink, fontWeight: FontWeight.w600),
+    child: LayoutBuilder(
+      builder: (context, box) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // A long label wraps (at most 60% of the row) instead of pushing the value off.
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: box.maxWidth.isFinite ? box.maxWidth * .6 : double.infinity),
+            child: Text(k, style: T.sm(context).copyWith(color: context.c.muted)),
           ),
-        ),
-      ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              v,
+              textAlign: TextAlign.right,
+              style: T.sm(context).copyWith(color: vColor ?? context.c.ink, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -1813,11 +1820,13 @@ class TopHead extends StatelessWidget {
                     child: Text(eyebrow!.toUpperCase(), maxLines: 1, style: T.eyebrow(context).copyWith(color: onBand ? Colors.white.withValues(alpha: .8) : null)),
                   ),
                 if (oneLine)
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: AlignmentDirectional.centerStart,
-                    child: Text(title, maxLines: 1, style: T.h1(context).copyWith(color: fg)),
-                  )
+                  // Each line of the title (split on '\n') stays on one line.
+                  for (final line in title.split('\n'))
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(line, maxLines: 1, style: T.h1(context).copyWith(color: fg)),
+                    )
                 else
                   Text(title, style: T.h1(context).copyWith(color: fg)),
                 if (sub != null) Text(sub!, style: T.sm(context).copyWith(color: onBand ? Colors.white.withValues(alpha: .85) : context.c.muted)),

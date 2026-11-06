@@ -50,10 +50,17 @@ class _BodyState extends State<_Body> {
       _filled = true;
       amount.text = '${vm.payable}';
     }
-    final ready = _amount > 0 && (vm.method != PayMethod.online || (vm.proofPath != null && reference.text.trim().isNotEmpty));
+    final ready =
+        _amount > 0 &&
+        switch (vm.method) {
+          PayMethod.online => vm.proofPath != null && reference.text.trim().isNotEmpty,
+          PayMethod.rider => !vm.pickRider || vm.rider != null,
+          PayMethod.cash => true,
+        };
     return HPage(
       title: tr('Pay outstanding'),
       alwaysTitle: true,
+      onRefresh: vm.pull,
       footer: vm.payable <= 0 ? null : HButton(_cta(vm.method), icon: 'check', block: true, onTap: ready ? () => _send(context, vm) : null),
       children: staggered([
         const SizedBox(height: 8),
@@ -71,6 +78,22 @@ class _BodyState extends State<_Body> {
           ]),
         ),
         const SizedBox(height: 20),
+        // Why part (or all) of the balance can't be paid again right now.
+        if (vm.openRequests.isNotEmpty) ...[
+          Text(tr('ALREADY SENT'), style: T.eyebrow(context)),
+          const SizedBox(height: 10),
+          HCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            child: Column(
+              children: [
+                for (final (i, r) in vm.openRequests.indexed) ...[if (i > 0) const HDivider(), _OpenRequest(r, onCancel: r.status == 'PENDING' ? () => _cancel(context, vm, r) : null)],
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(tr('These amounts are held until HOLA or the rider confirms them. Cancel a waiting one to pay that money another way.'), style: T.cap(context)),
+          const SizedBox(height: 20),
+        ],
         if (vm.payable <= 0)
           HCard(
             child: EmptyState(
@@ -94,7 +117,7 @@ class _BodyState extends State<_Body> {
           OptionTile(
             icon: 'truck',
             title: tr('Pay to the rider'),
-            sub: tr('Hand the cash to the HOLA rider on your next delivery.'),
+            sub: vm.pickRider ? tr('Choose a HOLA rider and hand them the cash.') : tr('Hand the cash to the HOLA rider on your next delivery.'),
             on: vm.method == PayMethod.rider,
             onTap: () => _pick(vm, PayMethod.rider),
           ),
@@ -121,12 +144,57 @@ class _BodyState extends State<_Body> {
             ],
           ] else ...[
             const SizedBox(height: 14),
-            _Note(tr('The rider records the cash in the app and hands it to HOLA. Your statement updates once HOLA confirms it.')),
+            if (vm.pickRider) ...[
+              Text(tr('WHICH RIDER?'), style: T.eyebrow(context)),
+              const SizedBox(height: 10),
+              if (vm.ridersLoading)
+                const Center(
+                  child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()),
+                )
+              else if (vm.ridersError != null)
+                _Note(vm.ridersError!)
+              else if (vm.riders.isEmpty)
+                _Note(tr('No HOLA riders work in your city right now. Pay HOLA directly instead.'))
+              else
+                for (final r in vm.riders)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: OptionTile(
+                      leading: Avatar(r.name, size: 40),
+                      title: r.name,
+                      sub: [if (r.city.isNotEmpty) r.city, if (r.phone.isNotEmpty) r.phone].join(' · '),
+                      on: vm.rider?.id == r.id,
+                      onTap: () {
+                        Sfx.tap();
+                        vm.setRider(r);
+                      },
+                    ),
+                  ),
+              const SizedBox(height: 6),
+              _Note(tr('The rider gets a notification and confirms in their app when they have your cash. Then it counts as paid straight away.')),
+            ] else
+              _Note(tr('The rider records the cash in the app and hands it to HOLA. Your statement updates once HOLA confirms it.')),
           ],
         ],
         const SizedBox(height: 24),
       ]),
     );
+  }
+
+  Future<void> _cancel(BuildContext context, PayOutstandingViewModel vm, PaymentRequest r) async {
+    final ok = await confirmSheet(
+      context,
+      title: tr('Cancel {code}?', {'code': r.code.isEmpty ? tr('this payment') : r.code}),
+      body: tr('{amount} becomes payable again, by any method.', {'amount': rs(r.amount)}),
+      confirm: tr('Cancel payment'),
+      danger: true,
+      cancel: tr('Keep it'),
+    );
+    if (!ok) return;
+    if (await attempt(() => vm.cancelRequest(r), success: tr('Payment cancelled'), icon: 'x')) {
+      _filled = false; // refill the amount with what's payable now
+      if (mounted) setState(() {});
+    }
   }
 
   String _cta(PayMethod m) => switch (m) {
@@ -159,6 +227,7 @@ class _BodyState extends State<_Body> {
     final ok = await attempt(
       () => vm.submit(amount: _amount, reference: reference.text),
       success: switch (m) {
+        PayMethod.rider when vm.rider != null => tr('Sent to {name}. Hand them {amount}; it\'s paid once they confirm.', {'name': vm.rider!.name, 'amount': rs(_amount)}),
         PayMethod.rider => tr('Done. The rider will collect {amount} on your next delivery.', {'amount': rs(_amount)}),
         PayMethod.cash => tr('Noted. Pay {amount} at the HOLA office.', {'amount': rs(_amount)}),
         PayMethod.online => tr('Receipt sent. HOLA will confirm it.'),
@@ -238,6 +307,61 @@ class _Proof extends StatelessWidget {
                   ),
                 ],
               ),
+      ),
+    );
+  }
+}
+
+/// A payment already sent: how, how much, where it stands, and Cancel.
+class _OpenRequest extends StatelessWidget {
+  const _OpenRequest(this.r, {this.onCancel});
+  final PaymentRequest r;
+  final VoidCallback? onCancel;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final how = switch (r.method) {
+      PayMethod.rider => r.riderName == null ? tr('Cash to rider') : tr('Cash to {name}', {'name': r.riderName}),
+      PayMethod.cash => tr('Cash at HOLA office'),
+      PayMethod.online => tr('Online transfer'),
+    };
+    final state = switch (r.status) {
+      'COLLECTED' => tr('Rider has the cash · HOLA confirms soon'),
+      _ when r.method == PayMethod.rider => tr('Waiting for the rider'),
+      _ => tr('Waiting for HOLA'),
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${r.code.isEmpty ? '' : '${r.code} · '}$how', maxLines: 1, overflow: TextOverflow.ellipsis, style: T.ttl(context)),
+                Text('$state · ${dLabel(r.createdAt)}', style: T.cap(context)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(rs(r.collectedAmount ?? r.amount), style: T.ttl(context)),
+              if (onCancel != null)
+                Tap(
+                  onTap: onCancel,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      tr('Cancel'),
+                      style: T.sm(context).copyWith(color: c.badInk, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

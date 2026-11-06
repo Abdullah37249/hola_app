@@ -81,7 +81,7 @@ class _Body extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(p.name, style: T.ttl(context)),
-                              Text(tr('{category} · from {price}', {'category': tr(p.category), 'price': rs(p.fromPrice)}), style: T.sub(context)),
+                              Text(tr('{category} · from {price}', {'category': tr(p.category), 'price': rsShort(p.fromPrice)}), style: T.sub(context)),
                               const SizedBox(height: 4),
                               Wrap(
                                 spacing: 6,

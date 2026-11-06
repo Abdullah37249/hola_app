@@ -20,6 +20,23 @@ String rs(num n) {
   return 'Rs\u00A0${n < 0 ? '-' : ''}$s';
 }
 
+/// Large amounts, shortened for summaries: 1,000 → 1K, 58,800 → 58.8K,
+/// 1,000,000 → 1M. Below 1,000 it's the exact amount. Bills, payments and
+/// cash to collect keep [rs] (exact rupees).
+String rsShort(num n) => 'Rs\u00A0${shortNum(n)}';
+
+/// 1,000 → 1K, 58,800 → 58.8K, 2,500,000 → 2.5M (one decimal, dropped when .0).
+String shortNum(num n) {
+  final a = n.abs();
+  final sign = n < 0 ? '-' : '';
+  String one(double v) => (v >= 100 ? v.round().toString() : v.toStringAsFixed(1)).replaceFirst(RegExp(r'\.0$'), '');
+  if (a < 1000) return '$sign${a.round()}';
+  // 999,950 would round to "1000K": show it as 1M instead.
+  if (a < 999950) return '$sign${one(a / 1000)}K';
+  if (a < 999950000) return '$sign${one(a / 1000000)}M';
+  return '$sign${one(a / 1000000000)}B';
+}
+
 String fmtDur(int m) => m < 60 ? tr('{n} min', {'n': m}) : '${tr('{n} h', {'n': m ~/ 60})}${m % 60 != 0 ? ' ${tr('{n} min', {'n': m % 60})}' : ''}';
 
 /// Decimal hours (16.5) → "4:30 pm".
@@ -32,7 +49,9 @@ String fmtT(double t) {
 }
 
 int weekday0(DateTime d) => d.weekday % 7; // 0 = Sun, matches the API's weekday
-String dLabel(DateTime d) => '${days[weekday0(d)]}, ${d.day} ${months[d.month - 1]}';
+/// "Wed, 4 Nov"; with the year when it isn't this year ("Tue, 12 Oct 2027"),
+/// so a far-off date doesn't read as one already past.
+String dLabel(DateTime d) => '${days[weekday0(d)]}, ${d.day} ${months[d.month - 1]}${d.year != DateTime.now().year ? ' ${d.year}' : ''}';
 
 String initials(String name) => name.split(' ').where((w) => w.isNotEmpty).map((w) => w[0]).take(2).join();
 

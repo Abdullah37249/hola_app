@@ -57,7 +57,7 @@ class BookingDetailViewModel extends RepoViewModel with CustomerLookups {
 
   Future<void> cancel(String reason) => bookings.cancel(id, reason);
   Future<void> reschedule(DateTime start, String? staffId) => bookings.reschedule(id, start, staffId: staffId);
-  Future<void> addReview(int stars, String text) => engage.addReview(appointmentId: id, stars: stars, text: text);
+  Future<void> addReview(int stars, String text, List<(String, String)> photos) => engage.addReview(appointmentId: id, stars: stars, text: text, photos: photos);
 }
 
 /// Feedback & complaints the customer has raised.

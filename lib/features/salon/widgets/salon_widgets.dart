@@ -493,7 +493,7 @@ class ApptRow extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(rs(a.price), style: T.ttl(context)),
+                  Text(rsShort(a.price), style: T.ttl(context)),
                   const SizedBox(height: 6),
                   StatusBadge(a.status),
                   if (a.isWalkIn) ...[const SizedBox(height: 4), ToneBadge(tr('Walk-in'))],

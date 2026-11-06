@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- Shown the instant the app is tapped (before Android 12): launch navy with
+     the white HOLA logo where the Flutter splash draws it. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launch_navy" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <item
+        android:width="120dp"
+        android:height="38dp"
+        android:bottom="30dp"
+        android:gravity="center"
+        android:drawable="@drawable/splash_logo" />
 </layer-list>

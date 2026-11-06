@@ -9,6 +9,7 @@ import '../../../shared/widgets/ui.dart';
 import '../viewmodels/customer_lookups.dart';
 import '../viewmodels/discover_view_models.dart';
 import '../widgets/salon_cards.dart';
+import '../widgets/salon_map.dart';
 
 class CustomerExplore extends StatelessWidget {
   const CustomerExplore({super.key});
@@ -61,7 +62,15 @@ class _ExploreBodyState extends State<_ExploreBody> {
       role: 'customer',
       onRefresh: vm.syncSalons,
       children: [
-        ...staggered([TopHead(title: tr('Explore'), sub: tr('Find and book salons near you'), actions: const []), const SizedBox(height: 14)]),
+        ...staggered([
+          TopHead(
+            title: tr('Explore'),
+            sub: tr('Find and book salons near you'),
+            // List ↔ map.
+            actions: [IconBtn(vm.showMap ? 'list' : 'map', onBand: true, onTap: vm.toggleMap)],
+          ),
+          const SizedBox(height: 14),
+        ]),
         // Search across the header's edge, like every other screen.
         BandMark(
           match: true,
@@ -113,6 +122,16 @@ class _ExploreBodyState extends State<_ExploreBody> {
           const SizedBox(height: 14),
           ChipRow(
             children: [
+              HChip(
+                vm.locating ? tr('Finding you…') : tr('Near me'),
+                icon: 'nav',
+                on: vm.nearFirst,
+                onTap: vm.locating
+                    ? null
+                    : () async {
+                        if (!await vm.toggleNearMe()) Fx.toast(tr('Turn on location and allow HOLA to use it to see salons near you.'), icon: 'pin', tone: 'bad');
+                      },
+              ),
               if (cities.length > 1)
                 for (final ct in cities) HChip(ct, icon: 'pin', on: vm.city == ct, onTap: () => vm.setCity(ct)),
               for (final cat in serviceCategories) HChip(tr(cat), on: vm.category == cat, onTap: () => vm.setCategory(cat)),
@@ -148,12 +167,30 @@ class _ExploreBodyState extends State<_ExploreBody> {
             child: Padding(
               padding: const EdgeInsets.only(bottom: 14),
               child: Text(
-                (vm.city != null ? tr('{salons} in {city}', {'salons': plural(list.length, 'salon'), 'city': vm.city}) : plural(list.length, 'salon')).toUpperCase(),
+                [
+                  vm.city != null ? tr('{salons} in {city}', {'salons': plural(list.length, 'salon'), 'city': vm.city}) : plural(list.length, 'salon'),
+                  if (vm.nearFirst) tr('nearest first'),
+                ].join(' · ').toUpperCase(),
                 style: T.eyebrow(context),
               ),
             ),
           ),
-          ...staggered([for (final s in list) Padding(padding: const EdgeInsets.only(bottom: 28), child: SalonCard(s))], 5),
+          if (vm.showMap)
+            Reveal(
+              i: 5,
+              child: SizedBox(
+                height: MediaQuery.sizeOf(context).height * .58,
+                child: SalonMap(pins: vm.pins(list), here: vm.here, distanceTo: vm.distanceTo),
+              ),
+            )
+          else
+            ...staggered([
+              for (final s in list)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 28),
+                  child: SalonCard(s, km: vm.distanceTo(s)),
+                ),
+            ], 5),
         ],
       ],
     );

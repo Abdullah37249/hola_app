@@ -8,6 +8,8 @@ import 'package:hola_professional/core/utils/sfx.dart';
 import 'viewmodels/session_view_model.dart';
 import 'package:hola_professional/shared/widgets/ui.dart';
 import 'tabs.dart';
+import '../core/push/push_events.dart';
+import '../domain/entities/entities.dart';
 import '../domain/repositories/repositories.dart';
 import '../features/profile/views/permissions_page.dart';
 
@@ -23,16 +25,61 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   final Map<String, Widget> _built = {};
   Timer? _poll;
 
-  /// Bookings made or changed on the HOLA server (by customers, the salon or
-  /// HOLA) arrive while the app is open: on start, every 20 seconds, and on resume.
-  void _sync() {
-    context.read<BookingRepository>().sync();
-    context.read<EngagementRepository>().sync();
+  StreamSubscription<String>? _pushes;
+
+  /// Keeps every dashboard live. Changes made on the HOLA server (by customers,
+  /// the salon, riders or HOLA) arrive the moment a push for them lands, every
+  /// 20 seconds while the app is open, and on resume. [kind] is a push `type`:
+  /// only what it touches is fetched; null fetches everything for this role.
+  void _sync([String? kind]) {
+    final me = context.read<SessionViewModel>().account;
+    if (me == null) return;
+    final trade = context.read<TradeRepository>();
+    // 'resume' (app opened again) fetches everything, including the slower
+    // credit statement that the 20-second poll skips.
+    final all = kind == null || kind == 'resume';
+    bool wants(Set<String> kinds) => all || kinds.contains(kind);
+    void run(Future<void> Function() f) => f().catchError((Object _) {});
+    if (wants(const {'chat_message', 'message'})) run(context.read<ChatRepository>().sync);
+    // Returns: a status push, and the replacement order moving along.
+    if (wants(const {'return', 'return_pickup', 'order'}) && (me.role == Role.salonOwner || me.role == Role.rider)) run(context.read<ReturnRepository>().syncReturns);
+    if (wants(const {'appointment', 'review', 'complaint'})) {
+      run(context.read<BookingRepository>().sync);
+      run(context.read<EngagementRepository>().sync);
+    }
+    final salonId = me.salonId;
+    if (kind == 'resume' && salonId != null && (me.role == Role.salonOwner || me.role == Role.salonStaff)) run(() => context.read<SalonRepository>().syncMySalon(salonId));
+    switch (me.role) {
+      case Role.salonOwner when salonId != null:
+        if (wants(const {'order'})) run(() => trade.syncOrders(salonId));
+        // A settled return adds a voucher, or takes money off the outstanding.
+        if (kind != null && {'resume', 'payment_request', 'order', 'return'}.contains(kind)) {
+          run(() => trade.syncCredit(salonId));
+          run(() => trade.syncPaymentRequests(salonId));
+        }
+        if (kind == 'coupon' || kind == 'order' || kind == 'return' || kind == 'resume') run(() => trade.syncCoupons(salonId));
+        if (kind == 'order' || kind == 'resume') run(() => trade.syncProductReviews(salonId));
+        if (kind == 'training_session' || kind == 'certificate') run(context.read<FieldRepository>().syncTrainings);
+        // Salon offers: a booking that used one changes its counts.
+        if (kind == 'offer' || kind == 'appointment') run(() => context.read<SalonRepository>().syncOffers(salonId: salonId));
+      case Role.customer when kind == 'offer' || kind == 'appointment' || kind == 'resume':
+        run(() => context.read<SalonRepository>().syncOffers());
+      case Role.salonStaff when kind == 'training_session' || kind == 'certificate':
+        run(context.read<FieldRepository>().syncTrainings);
+      case Role.rider:
+        if (wants(const {'order'})) run(trade.syncDeliveries);
+        if (wants(const {'credit_collection'})) run(trade.syncCollections);
+        // Cash in hand follows the deliveries (and the 20-second poll).
+        if (wants(const {'order'})) run(trade.syncCash);
+      case Role.trainer when wants(const {'training_session'}):
+        run(context.read<FieldRepository>().syncTrainings);
+      default:
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _sync();
+    if (state == AppLifecycleState.resumed) _sync('resume');
   }
 
   // Pops up news that arrives while the app is open (e.g. "Booking confirmed").
@@ -63,6 +110,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void dispose() {
     _engage.changes.removeListener(_onData);
     _poll?.cancel();
+    _pushes?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -75,8 +123,28 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     _who = context.read<SessionViewModel>().account?.id;
     _engage.changes.addListener(_onData);
     _poll = Timer.periodic(const Duration(seconds: 20), (_) => _sync());
+    _pushes = pushEvents.stream.listen((kind) {
+      // A push type the app doesn't know yet refreshes everything.
+      const known = {
+        'chat_message',
+        'message',
+        'return',
+        'return_pickup',
+        'appointment',
+        'review',
+        'complaint',
+        'order',
+        'payment_request',
+        'coupon',
+        'offer',
+        'training_session',
+        'certificate',
+        'credit_collection',
+      };
+      if (mounted) _sync(known.contains(kind) ? kind : 'resume');
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _sync();
+      if (mounted) _sync('resume');
     });
     // First time in: explain and ask for the phone permissions this role uses.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -193,10 +261,11 @@ class _TabBar extends StatelessWidget {
                 height: 54,
                 child: Stack(
                   children: [
-                    AnimatedPositioned(
+                    // Directional, so the pill follows the tab in Urdu (right to left).
+                    AnimatedPositionedDirectional(
                       duration: const Duration(milliseconds: 450),
                       curve: kSpring,
-                      left: w * index,
+                      start: w * index,
                       top: 0,
                       bottom: 0,
                       width: w,

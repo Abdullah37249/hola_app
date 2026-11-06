@@ -26,7 +26,10 @@ void main() {
   }
 
   test('every translated text has Urdu', () {
-    final missing = [for (final e in keysInCode().entries) if (!L10n.urdu.containsKey(e.key)) '${e.value}: ${e.key}'];
+    final missing = [
+      for (final e in keysInCode().entries)
+        if (!L10n.urdu.containsKey(e.key)) '${e.value}: ${e.key}',
+    ];
     expect(missing, isEmpty, reason: 'No Urdu for:\n${missing.join('\n')}');
   });
 

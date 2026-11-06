@@ -186,9 +186,11 @@ class _PaymentTile extends StatelessWidget {
       PayMethod.online => tr('Online transfer'),
     };
     final (label, tone) = switch (p.status) {
+      'PENDING' when p.method == PayMethod.rider && p.riderName != null => (tr('Waiting for {name}', {'name': p.riderName!.split(' ').first}), 'warn'),
       'PENDING' => (p.method == PayMethod.rider ? tr('Rider will collect') : tr('Waiting for HOLA'), 'warn'),
+      // CONFIRMED = paid (rider confirmed, or HOLA counted it).
+      'PAID' || 'CONFIRMED' => (tr('Paid'), 'ok'),
       'COLLECTED' => (tr('Rider collected'), 'info'),
-      'CONFIRMED' => (tr('Confirmed'), 'ok'),
       'REJECTED' => (tr('Not accepted'), 'bad'),
       _ => (tr('Cancelled'), 'mute'),
     };
@@ -196,7 +198,7 @@ class _PaymentTile extends StatelessWidget {
       dLabel(p.createdAt),
       if (p.code.isNotEmpty) p.code,
       if (p.reference.isNotEmpty) p.reference,
-      if (p.collectedBy != null) tr('by {name}', {'name': p.collectedBy}),
+      if (p.collectedBy != null) tr('by {name}', {'name': p.collectedBy}) else if (p.riderName != null) tr('to {name}', {'name': p.riderName}),
     ].join(' · ');
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -267,6 +269,7 @@ class _LedgerTile extends StatelessWidget {
       'CHARGE' => ('box', e.ref.isEmpty ? tr('Order on credit') : tr('Order {code}', {'code': e.ref}), c.brandSoft),
       'PAYMENT' => ('cash', tr('Payment received'), c.okSoft),
       'ADJUSTMENT' => ('edit', tr('Adjustment by HOLA'), c.bg2),
+      'RETURN' => ('again', e.ref.isEmpty ? tr('Returned products') : tr('Return {code}', {'code': e.ref}), c.okSoft),
       _ => ('x', e.ref.isEmpty ? tr('Order cancelled') : tr('Cancelled {code}', {'code': e.ref}), c.bg2),
     };
     return Padding(

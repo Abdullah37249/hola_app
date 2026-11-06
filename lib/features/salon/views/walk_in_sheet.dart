@@ -92,9 +92,7 @@ class _WalkInState extends State<_WalkIn> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: [
-            for (final (i, t) in times.indexed) HChip(i == 0 ? tr('Now · {time}', {'time': fmtTime(t)}) : fmtTime(t), on: start == t, onTap: () => setState(() => start = t)),
-          ],
+          children: [for (final (i, t) in times.indexed) HChip(i == 0 ? tr('Now') : fmtTime(t), on: start == t, onTap: () => setState(() => start = t))],
         ),
       if (picked.isNotEmpty) Text('${fmtDur(dur)} · ${rs(price)}', style: T.sm(context).copyWith(color: c.muted)),
       HButton(

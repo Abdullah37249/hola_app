@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ system splash icon. Android scales this drawable to its
+     288dp icon area and masks it to a 192dp circle, so the drawable is the
+     full 288dp with the white HOLA logo small in the middle (inside the
+     circle), a little above centre where the Flutter splash draws it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <size android:width="288dp" android:height="288dp" />
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+    <item
+        android:width="120dp"
+        android:height="38dp"
+        android:bottom="30dp"
+        android:gravity="center"
+        android:drawable="@drawable/splash_logo" />
+</layer-list>

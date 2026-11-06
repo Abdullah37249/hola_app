@@ -5,8 +5,10 @@ import '../../../domain/repositories/repositories.dart';
 
 /// One order, with what the signed-in role may do with it.
 class OrderDetailViewModel extends RepoViewModel {
-  OrderDetailViewModel(this.trade, this.salons, this.auth, this.id) : super(trade);
+  OrderDetailViewModel(this.trade, this.salons, this.auth, this.id, {this.chat, this.returns}) : super(trade);
   final TradeRepository trade;
+  final ReturnRepository? returns;
+  final ChatRepository? chat;
   final SalonRepository salons;
   final AuthRepository auth;
   final String id;
@@ -25,11 +27,26 @@ class OrderDetailViewModel extends RepoViewModel {
   bool get isOfficer => role == Role.salesOfficer;
   String get status => order?.status ?? '';
 
+  /// The salon can chat with the rider who has (or had) this delivery.
+  bool get canMessageRider =>
+      isOwner &&
+      order?.riderId != null &&
+      (chat?.live ?? false) &&
+      {OrderStatus.dispatched, OrderStatus.outForDelivery, OrderStatus.delivered, OrderStatus.failed, OrderStatus.confirmed}.contains(status);
   bool get canOwnerCancel => isOwner && {OrderStatus.placed, OrderStatus.underReview}.contains(status);
   bool get canConfirmReceipt => isOwner && status == OrderStatus.delivered;
   bool get canApprove => isOfficer && {OrderStatus.placed, OrderStatus.underReview}.contains(status);
   bool get canDispatch => isOfficer && {OrderStatus.approved, OrderStatus.failed}.contains(status);
   bool get canOfficerCancel => isOfficer && {OrderStatus.placed, OrderStatus.underReview, OrderStatus.approved, OrderStatus.dispatched, OrderStatus.failed}.contains(status);
+
+  /// The salon can send products from this delivered order back.
+  bool get canReturn => isOwner && order != null && (returns?.live ?? false) && returns!.canReturn(order!);
+  List<ReturnRequest> get orderReturns => returns?.returnsForOrder(id) ?? const [];
+
+  /// The salon rates the HOLA products it received.
+  bool get canRate => order != null && trade.canRateProducts(order!);
+  Map<String, ProductReview> get myRatings => trade.productReviewsOn(id);
+  Future<void> rate(Map<String, (int, String)> ratings) => trade.rateProducts(id, ratings);
 
   Future<void> approve() => trade.approveOrder(id);
   Future<void> dispatch(String riderId) => trade.dispatch(id, riderId);
@@ -73,6 +90,9 @@ class SalonOrdersViewModel extends RepoViewModel {
 
 /// Catalogue browsing + cart for one salon. Cart is keyed by variant.
 class NewOrderViewModel extends RepoViewModel {
+  /// Salons' rating of a HOLA product: (average, count).
+  (double, int) rating(Product p) => trade.productRating(p.id);
+
   NewOrderViewModel(this.trade, this.salons, this.salonId, {this.suggestedCoupon}) : super(trade) {
     trade.syncCatalogue();
     trade.syncCoupons(salonId);
@@ -153,11 +173,15 @@ class NewOrderViewModel extends RepoViewModel {
   OrderQuote? coupon;
   String? couponError;
   bool couponBusy = false;
+
+  /// The code last checked, so the box shows which coupon an error is about.
+  String triedCode = '';
   int get discount => coupon?.discount ?? 0;
 
   /// Checks [code] with HOLA and applies its discount, or shows why not.
   Future<void> applyCoupon(String code) async {
     if (code.trim().isEmpty) return;
+    triedCode = code.trim().toUpperCase();
     couponBusy = true;
     couponError = null;
     notify();
@@ -401,11 +425,46 @@ class PayOutstandingViewModel extends RepoViewModel {
   PayOutstandingViewModel(this.trade, this.salonId) : super(trade) {
     trade.syncCredit(salonId);
     trade.syncPaymentRequests(salonId);
+    if (trade.canPickRider) loadRiders();
   }
+
+  // ── pay a rider of your choice ──
+  bool get pickRider => trade.canPickRider;
+  List<RiderOption> riders = const [];
+  bool ridersLoading = false;
+  String? ridersError;
+  RiderOption? rider;
+
+  Future<void> loadRiders() async {
+    ridersLoading = true;
+    ridersError = null;
+    notify();
+    try {
+      riders = await trade.ridersFor(salonId);
+      if (rider != null && riders.every((r) => r.id != rider!.id)) rider = null;
+    } on DomainError catch (e) {
+      ridersError = e.message;
+    } catch (_) {
+      ridersError = tr('Couldn’t load riders. Pull down to try again.');
+    }
+    ridersLoading = false;
+    notify();
+  }
+
+  void setRider(RiderOption r) {
+    rider = r;
+    notify();
+  }
+
   final TradeRepository trade;
   final String salonId;
 
   CreditSummary get credit => trade.credit(salonId);
+
+  /// Payments already sent that still hold part of the balance.
+  List<PaymentRequest> get openRequests => trade.paymentRequests(salonId).where((r) => r.open).toList();
+  Future<void> cancelRequest(PaymentRequest r) => trade.cancelPaymentRequest(salonId, r.id);
+  Future<void> pull() => Future.wait([trade.syncCredit(salonId), trade.syncPaymentRequests(salonId)]);
 
   /// Owed now, less payments already waiting for HOLA.
   int get payable => trade.payableNow(salonId);
@@ -426,6 +485,12 @@ class PayOutstandingViewModel extends RepoViewModel {
     notify();
   }
 
-  Future<void> submit({required int amount, String reference = ''}) =>
-      trade.requestPayment(salonId, method: method, amount: amount, reference: reference, proofPath: method == PayMethod.online ? proofPath : null);
+  Future<void> submit({required int amount, String reference = ''}) => trade.requestPayment(
+    salonId,
+    method: method,
+    amount: amount,
+    reference: reference,
+    proofPath: method == PayMethod.online ? proofPath : null,
+    riderId: method == PayMethod.rider ? rider?.id : null,
+  );
 }

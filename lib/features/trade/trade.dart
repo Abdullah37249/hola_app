@@ -7,5 +7,6 @@ export 'views/salon_orders_page.dart' show SalonOrdersPage, SalonProductsTab, is
 export 'views/offers_page.dart' show OffersPage;
 export 'views/pay_outstanding_page.dart' show PayOutstandingPage;
 export 'views/statement_page.dart' show StatementPage;
+export 'views/returns_pages.dart' show ReturnsPage, ReturnDetailPage, NewReturnPage, ReturnCard;
 export 'widgets/promo_card.dart' show PromoCard;
 export 'widgets/trade_widgets.dart' show CreditCard, OrderCard, OrderProgress, SchemeBadge, SignatureView, ProductThumb;

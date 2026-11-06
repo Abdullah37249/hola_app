@@ -102,7 +102,11 @@ class StaffProfile {
   final List<Shift?> week;
   final DateTime createdAt;
 
-  StaffProfile({required this.accountId, required this.salonId, required this.title, this.bookable = true, List<Shift?>? week, required this.createdAt}) : week = week ?? List<Shift?>.filled(7, null);
+  /// The branch they work at (null = the salon's first branch).
+  String? branchId;
+
+  StaffProfile({required this.accountId, required this.salonId, required this.title, this.bookable = true, List<Shift?>? week, required this.createdAt, this.branchId})
+    : week = week ?? List<Shift?>.filled(7, null);
 
   Shift? shiftOn(DateTime d) => week[d.weekday - 1];
 
@@ -113,6 +117,7 @@ class StaffProfile {
     'bookable': bookable,
     'week': [for (final s in week) s?.toJson()],
     'createdAt': iso(createdAt),
+    if (branchId != null) 'branchId': branchId,
   };
 
   factory StaffProfile.fromJson(Json j) => StaffProfile(
@@ -122,6 +127,7 @@ class StaffProfile {
     bookable: j['bookable'] ?? true,
     week: [for (final s in (j['week'] as List)) s == null ? null : Shift.fromJson(s as Json)],
     createdAt: dt(j['createdAt'])!,
+    branchId: j['branchId'],
   );
 }
 
@@ -142,4 +148,17 @@ class LeaveRequest {
   Json toJson() => {'id': id, 'salonId': salonId, 'staffId': staffId, 'from': iso(from), 'to': iso(to), 'reason': reason, 'status': status, 'createdAt': iso(createdAt)};
   factory LeaveRequest.fromJson(Json j) =>
       LeaveRequest(id: j['id'], salonId: j['salonId'], staffId: j['staffId'], from: dt(j['from'])!, to: dt(j['to'])!, reason: j['reason'] ?? '', status: j['status'], createdAt: dt(j['createdAt'])!);
+}
+
+/// An account that signs in with a fingerprint on this phone.
+class FingerprintAccount {
+  final String accountId, name, email;
+
+  /// Role name (e.g. 'rider'), so each sign-in screen offers its own accounts.
+  final String role;
+  const FingerprintAccount({required this.accountId, required this.name, required this.email, this.role = ''});
+  String get firstName => name.trim().split(' ').first;
+  Map<String, dynamic> toJson() => {'accountId': accountId, 'name': name, 'email': email, 'role': role};
+  factory FingerprintAccount.fromJson(Map<String, dynamic> j) =>
+      FingerprintAccount(accountId: '${j['accountId']}', name: '${j['name'] ?? ''}', email: '${j['email'] ?? ''}', role: '${j['role'] ?? ''}');
 }

@@ -51,7 +51,7 @@ class _PerfBody extends StatelessWidget {
         const SizedBox(height: 12),
         KpiStrip([
           Kpi(tr('Orders taken'), vm.ordersCount, hl: true, icon: 'box'),
-          Kpi(tr('Order value'), vm.ordersValue / 1000, format: (v) => vm.ordersValue == 0 ? '0' : '${v.toStringAsFixed(1)}k', icon: 'cash'),
+          Kpi(tr('Order value'), vm.ordersValue, format: shortNum, icon: 'cash'),
           Kpi(tr('Verified salons'), vm.activeSalons, sub: tr('of {n} on HOLA', {'n': vm.totalSalons}), icon: 'shield'),
         ]),
         const SizedBox(height: 24),
@@ -139,7 +139,7 @@ class _ReportBody extends StatelessWidget {
         KpiStrip([
           Kpi(tr('Visits done'), r?.visitsDone ?? vm.visitsDone, sub: tr('of {n}', {'n': r?.visitsPlanned ?? vm.todays.length}), hl: true, icon: 'pin'),
           Kpi(tr('Orders'), r?.ordersCount ?? vm.ordersToday.length, icon: 'box'),
-          Kpi(tr('Value'), (r?.ordersValue ?? vm.ordersValue) / 1000, format: (v) => (r?.ordersValue ?? vm.ordersValue) == 0 ? '0' : '${v.toStringAsFixed(1)}k', icon: 'cash'),
+          Kpi(tr('Value'), r?.ordersValue ?? vm.ordersValue, format: shortNum, icon: 'cash'),
         ]),
         const SizedBox(height: 24),
         if (vm.todays.isNotEmpty) ...[
@@ -205,7 +205,7 @@ class _ReportBody extends StatelessWidget {
                               'done': p.visitsDone,
                               'planned': p.visitsPlanned,
                               'orders': plural(p.ordersCount, 'order'),
-                              'value': rs(p.ordersValue),
+                              'value': rsShort(p.ordersValue),
                             }),
                             style: T.cap(context),
                           ),

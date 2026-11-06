@@ -16,8 +16,8 @@ const kLaunchNavy = Color(0xFF000000);
 class SplashView extends StatefulWidget {
   final VoidCallback onDone;
 
-  /// App data has loaded. The intro waits for it: loading blocks the UI
-  /// thread, and an animation started earlier would play out unseen.
+  /// App data has loaded. Only the hand-over waits for it: the splash itself
+  /// shows from the very first frame.
   final bool ready;
   const SplashView({super.key, required this.onDone, required this.ready});
   @override
@@ -30,25 +30,23 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
   // Slow drift for the background glows; runs for the whole splash.
   late final AnimationController _drift = AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat(reverse: true);
 
-  bool _started = false;
+  bool _introDone = false, _leaving = false;
 
   @override
   void initState() {
     super.initState();
-    _maybeStart();
+    _intro();
   }
 
   @override
   void didUpdateWidget(SplashView old) {
     super.didUpdateWidget(old);
-    _maybeStart();
+    _maybeLeave();
   }
 
-  Future<void> _maybeStart() async {
-    if (_started || !widget.ready) return;
-    _started = true;
-    // Let a couple of frames through first so the intro begins on a smooth clock.
-    await WidgetsBinding.instance.endOfFrame;
+  /// Plays straight away: the logo is already on screen (as on the phone's
+  /// own launch screen), and the rings and tagline come in around it.
+  Future<void> _intro() async {
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     if (MediaQuery.disableAnimationsOf(context)) {
@@ -56,7 +54,14 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
     } else {
       await _in.forward();
     }
-    if (!mounted) return;
+    _introDone = true;
+    _maybeLeave();
+  }
+
+  /// Hands over once the intro has played and the app's data has loaded.
+  Future<void> _maybeLeave() async {
+    if (_leaving || !_introDone || !widget.ready || !mounted) return;
+    _leaving = true;
     await _out.forward();
     if (mounted) widget.onDone();
   }
@@ -81,9 +86,11 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
         builder: (context, _) {
           final out = Curves.easeInCubic.transform(_out.value);
           final bloom = _seg(0, .3);
-          final logo = _seg(.08, .55, Curves.easeOutBack);
-          final logoFade = _seg(.08, .4);
-          final blur = 10 * (1 - _seg(.08, .5));
+          // The logo starts where the phone's launch screen left it (visible,
+          // a little smaller) and settles to full size.
+          final logo = _seg(0, .45, Curves.easeOutBack);
+          const logoFade = 1.0;
+          const blur = 0.0;
           final shine = _seg(.6, .92, Curves.easeInOut);
           final tag = _seg(.55, .85);
           final bar = _seg(.35, 1, Curves.easeInOutCubic);
@@ -123,7 +130,7 @@ class _SplashState extends State<SplashView> with TickerProviderStateMixin {
                               Opacity(
                                 opacity: logoFade,
                                 child: Transform.scale(
-                                  scale: .72 + .28 * logo + .04 * out,
+                                  scale: .68 + .32 * logo + .04 * out,
                                   child: blur > .05
                                       ? ImageFiltered(
                                           imageFilter: ImageFilter.blur(sigmaX: blur, sigmaY: blur, tileMode: TileMode.decal),

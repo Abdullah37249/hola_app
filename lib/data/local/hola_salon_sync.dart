@@ -54,20 +54,23 @@ class HolaSalonSync {
       _memberVersion[id] = asInt(m['version']);
       mirrorPerson(db, id, m['fullName'] as String? ?? '', salonId: salonId, phone: m['phone'] as String? ?? '');
       final week = List<Shift?>.filled(7, null);
+      String? branchOf;
       try {
         final sch = await api.get('/salons/$salonId/staff/$id/schedule');
         final shifts = sch is Map ? (sch['shifts'] as List? ?? const []) : (sch as List? ?? const []);
         for (final s in shifts.cast<J>()) {
           week[_localDay(asInt(s['weekday']))] = Shift(_mins(s['start'] as String), _mins(s['end'] as String));
+          branchOf ??= s['branchId'] as String?;
         }
       } catch (_) {}
       final p = db.staff.where((x) => x.accountId == id).firstOrNull;
       if (p == null) {
-        db.staff.add(StaffProfile(accountId: id, salonId: salonId, title: m['title'] as String? ?? '', bookable: m['bookable'] == true, week: week, createdAt: now()));
+        db.staff.add(StaffProfile(accountId: id, salonId: salonId, title: m['title'] as String? ?? '', bookable: m['bookable'] == true, week: week, createdAt: now(), branchId: branchOf));
       } else {
         p
           ..title = m['title'] as String? ?? p.title
-          ..bookable = m['bookable'] == true;
+          ..bookable = m['bookable'] == true
+          ..branchId = branchOf ?? p.branchId;
         p.week.setAll(0, week);
       }
     }
@@ -75,11 +78,12 @@ class HolaSalonSync {
   }
 
   /// Saves a member's title, whether they take bookings, and weekly hours.
-  Future<void> pushMember(String salonId, String memberId, {required String title, required bool bookable, required List<Shift?> week}) async {
+  Future<void> pushMember(String salonId, String memberId, {required String title, required bool bookable, required List<Shift?> week, String? atBranch}) async {
     if (bookable && week.every((d) => d == null)) {
       throw DomainError(tr('Turn on at least one working day, or switch off “Takes bookings”.'));
     }
-    final branchId = db.branches.where((b) => b.salonId == salonId).firstOrNull?.id;
+    // Their shifts are at the branch they work at (the first branch by default).
+    final branchId = atBranch ?? db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).firstOrNull?.id;
     // Always edit the latest version: the server rejects a stale one.
     final members = _list(await api.get('/salons/$salonId/staff')).cast<J>();
     final cur = members.where((m) => m['id'] == memberId).firstOrNull;
@@ -113,7 +117,7 @@ class HolaSalonSync {
             as J;
     final id = res['id'] as String;
     _memberVersion[id] = asInt(res['version'], 1);
-    final branchId = db.branches.where((b) => b.salonId == salonId).firstOrNull?.id;
+    final branchId = db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).firstOrNull?.id;
     final week = _openingWeek(salonId);
     if (branchId != null) {
       await api.put('/salons/$salonId/staff/$id/schedule', {
@@ -211,6 +215,87 @@ class HolaSalonSync {
     await mirrorDiscoverSalon(db, api, await api.get('/discover/salons/$salonId', auth: false) as J, ownerId: ownerId);
   }
 
+  // ── leave (time off) ──
+
+  /// HOLA keeps leave as start/end instants; the phone shows whole days.
+  /// A day off runs from local midnight to the next midnight.
+  LeaveRequest _leave(String salonId, J j) {
+    final s = DateTime.parse('${j['startsAt']}').toLocal();
+    final e = DateTime.parse('${j['endsAt']}').toLocal().subtract(const Duration(minutes: 1));
+    final st = '${j['status'] ?? 'REQUESTED'}';
+    return LeaveRequest(
+      id: '${j['id']}',
+      salonId: salonId,
+      staffId: '${(j['member'] as Map?)?['id'] ?? j['memberId'] ?? ''}',
+      from: DateTime(s.year, s.month, s.day),
+      to: DateTime(e.year, e.month, e.day),
+      reason: '${j['reason'] ?? ''}',
+      status: st == 'REQUESTED' ? 'PENDING' : st,
+      createdAt: DateTime.tryParse('${j['createdAt'] ?? ''}')?.toLocal() ?? now(),
+    );
+  }
+
+  void _keepLeave(LeaveRequest l) {
+    final i = db.leave.indexWhere((x) => x.id == l.id);
+    i < 0 ? db.leave.add(l) : db.leave[i] = l;
+  }
+
+  /// Every leave request of the salon (managers see the whole team).
+  Future<void> pullLeave(String salonId) async {
+    final list = _list(await api.get('/salons/$salonId/leave')).cast<J>();
+    final seen = <String>{};
+    for (final j in list) {
+      final l = _leave(salonId, j);
+      seen.add(l.id);
+      _keepLeave(l);
+    }
+    db.leave.removeWhere((l) => l.salonId == salonId && !seen.contains(l.id));
+  }
+
+  /// A manager recording leave for a team member: approved straight away.
+  Future<LeaveRequest> addLeave(String salonId, {required String memberId, required DateTime from, required DateTime to, required String reason}) async {
+    final start = DateTime(from.year, from.month, from.day);
+    final end = DateTime(to.year, to.month, to.day + 1);
+    final j =
+        await api.post('/salons/$salonId/leave', {
+              'memberId': memberId,
+              'startsAt': start.toUtc().toIso8601String(),
+              'endsAt': end.toUtc().toIso8601String(),
+              if (reason.trim().isNotEmpty) 'reason': reason.trim(),
+            })
+            as J;
+    final l = _leave(salonId, j);
+    _keepLeave(l);
+    return l;
+  }
+
+  /// approve | decline | cancel
+  Future<void> leaveAction(String salonId, String leaveId, String action) async {
+    _keepLeave(_leave(salonId, await api.post('/salons/$salonId/leave/$leaveId/$action', const {}) as J));
+  }
+
+  // ── booking policy ──
+
+  /// Auto-confirm, cancellation window, no-show grace and the check-in window
+  /// as HOLA applies them (its defaults fill in what the salon hasn't set).
+  Future<void> pullPolicy(String salonId) async {
+    final j = await api.get('/salons/$salonId/booking-policy') as J;
+    final s = db.salons.where((x) => x.id == salonId).firstOrNull;
+    if (s == null) return;
+    final e = j['effective'] as Map? ?? const {};
+    s
+      ..autoConfirm = j['autoConfirm'] == true
+      ..cancelWindowHours = (asInt(e['cancellationWindowMin'] ?? j['cancellationWindowMin'], 120) / 60).round()
+      ..noShowGraceMin = asInt(e['noShowGraceMin'] ?? j['noShowGraceMin'], 15)
+      ..checkInEarlyMin = asInt(e['checkInEarlyMin'], 60);
+  }
+
+  Future<void> updatePolicy(String salonId, {required bool autoConfirm, required int cancelWindowHours, required int noShowGraceMin}) async {
+    final cur = await api.get('/salons/$salonId/booking-policy') as J;
+    await api.patch('/salons/$salonId/booking-policy', {'autoConfirm': autoConfirm, 'cancellationWindowMin': cancelWindowHours * 60, 'noShowGraceMin': noShowGraceMin, 'version': cur['version']});
+    await pullPolicy(salonId);
+  }
+
   // ── profile, branch, photos ──
 
   Future<void> updateProfile(String salonId, {String? name, String? phone, String? description, bool? autoConfirm}) async {
@@ -236,6 +321,38 @@ class HolaSalonSync {
       'version': cur?['version'] ?? 1,
     });
   }
+
+  /// Opens a new branch on HOLA with the main branch's opening hours and
+  /// menu, so customers can book it once someone on the team works there.
+  /// Returns the new branch.
+  Future<Branch> addBranch(String salonId, {required String name, required String address, required String area, required String city}) async {
+    final res = await api.post('/salons/$salonId/branches', {'name': name.trim(), 'addressLine': address.trim(), if (area.trim().isNotEmpty) 'area': area.trim(), 'city': city.trim()}) as J;
+    final main = db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).firstOrNull;
+    final b = Branch(
+      id: res['id'] as String,
+      salonId: salonId,
+      name: res['name'] as String? ?? name.trim(),
+      address: res['addressLine'] as String? ?? address.trim(),
+      area: res['area'] as String? ?? area.trim(),
+      city: res['city'] as String? ?? city.trim(),
+      hours: main == null ? null : [...main.hours],
+    );
+    db.branches.add(b);
+    if (main != null) {
+      await pushHours(b);
+      // The same services and prices as the main branch.
+      final items = _list(await api.get('/salons/$salonId/branches/${main.id}/services')).cast<J>();
+      for (final it in items.where((x) => x['active'] != false)) {
+        // Linked by service id (HOLA's or the salon's own), at the same price and length.
+        final svcId = (it['service'] as Map?)?['id'];
+        if (svcId == null) continue;
+        await api.post('/salons/$salonId/branches/${b.id}/services', {'serviceId': svcId, 'price': '${it['price']}', 'durationMin': asInt(it['durationMin'], 30)});
+      }
+    }
+    return b;
+  }
+
+  Future<void> deleteBranch(String salonId, String branchId) => api.delete('/salons/$salonId/branches/$branchId');
 
   /// Saves where the branch is: HOLA's flat latitude/longitude (both together).
   Future<void> setBranchLocation(Branch b, GeoFix at) async {

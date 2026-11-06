@@ -41,6 +41,14 @@ abstract final class PhotoFiles {
     return name;
   }
 
+  /// Saves downloaded bytes under [name] (e.g. a chat photo from HOLA).
+  static Future<File?> write(String name, List<int> bytes) async {
+    if (_dir == null) return null;
+    final f = File('$_dir/$name');
+    await f.writeAsBytes(bytes, flush: true);
+    return f;
+  }
+
   static Future<void> delete(String name) async {
     final f = file(name);
     if (f != null) await f.delete();

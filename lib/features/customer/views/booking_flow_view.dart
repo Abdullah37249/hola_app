@@ -10,21 +10,44 @@ import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/option_tile.dart';
 import '../../../shared/widgets/ui.dart';
+import '../widgets/offer_card.dart';
 import '../viewmodels/booking_flow_view_model.dart';
 import '../widgets/salon_cards.dart';
 import '../widgets/slot_picker.dart';
 import 'booking_detail_view.dart';
+import 'salon_view.dart';
 
 /// Professional → date & time → review, then a real booking request.
 class BookingFlowPage extends StatelessWidget {
   final String salonId, branchId;
   final List<String> serviceIds;
-  const BookingFlowPage({super.key, required this.salonId, required this.branchId, required this.serviceIds});
+
+  /// Book again: the same professional, straight to the free times.
+  final String? staffId;
+  final int startStep;
+  const BookingFlowPage({super.key, required this.salonId, required this.branchId, required this.serviceIds, this.staffId, this.startStep = 1});
   @override
   Widget build(BuildContext context) => ChangeNotifierProvider(
-    create: (c) => BookingFlowViewModel(c.read<SalonRepository>(), c.read<AuthRepository>(), c.read<BookingRepository>(), salonId: salonId, branchId: branchId, serviceIds: serviceIds),
+    create: (c) =>
+        BookingFlowViewModel(c.read<SalonRepository>(), c.read<AuthRepository>(), c.read<BookingRepository>(), salonId: salonId, branchId: branchId, serviceIds: serviceIds, staffId: staffId)
+          ..step = startStep,
     child: const _FlowBody(),
   );
+}
+
+/// "Book again" for a past visit: the same salon, branch, services and
+/// professional, opened at the next free times. Services the salon no longer
+/// offers are left out, and a professional who no longer takes bookings
+/// becomes "any professional". With nothing left to book, the salon page opens.
+Widget rebookPage(SalonRepository salons, Appointment a) {
+  final ids = [
+    for (final id in a.serviceIds)
+      if (salons.service(id)?.active == true) id,
+  ];
+  final branch = salons.branch(a.branchId) ?? salons.branches(a.salonId).firstOrNull;
+  if (ids.isEmpty || branch == null) return SalonPage(id: a.salonId);
+  final staff = salons.staff(a.salonId).any((p) => p.accountId == a.staffId && p.bookable) ? a.staffId : null;
+  return BookingFlowPage(salonId: a.salonId, branchId: branch.id, serviceIds: ids, staffId: staff, startStep: 2);
 }
 
 class _FlowBody extends StatefulWidget {
@@ -210,7 +233,10 @@ class _FlowBodyState extends State<_FlowBody> {
               KV(tr('Time'), '${fmtTime(t)} – ${fmtTime(t.add(Duration(minutes: b.minutes)))}'),
               KV(tr('Professional'), b.staffName ?? tr('First available')),
               const HDivider(),
-              for (final x in b.services) KV(x.name, rs(x.price)),
+              for (final x in b.services) ...[
+                KV(x.name, rs(x.price)),
+                if (b.offerFor(x.id) case final o?) KV(tr('Offer · {off}', {'off': offText(o)}), '−${rs(o.discountOn(x.price))}', vColor: context.c.ok),
+              ],
               const HDivider(),
               Row(
                 children: [

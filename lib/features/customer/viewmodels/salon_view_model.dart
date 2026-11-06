@@ -5,8 +5,10 @@ import 'customer_lookups.dart';
 
 /// Salon page: branch picker, menu selection, team, reviews.
 class SalonViewModel extends RepoViewModel with CustomerLookups {
-  SalonViewModel(this.salons, this.auth, this.engage, this.id) : super(salons) {
+  SalonViewModel(this.salons, this.auth, this.engage, this.id, {String? select}) : super(salons) {
     branchId = salons.branches(id).firstOrNull?.id;
+    engage.syncSalonReviews(id); // published reviews and their photos, from HOLA
+    if (select != null && salons.service(select)?.active == true) selected.add(select);
   }
   @override
   final SalonRepository salons;
@@ -36,11 +38,14 @@ class SalonViewModel extends RepoViewModel with CustomerLookups {
   }
 
   List<ServiceItem> get chosen => [for (final x in selected) ?salons.service(x)];
-  int get total => chosen.fold(0, (t, x) => t + x.price);
+  int get total => chosen.fold(0, (t, x) => t + priceAfterOffer(x));
   int get minutes => chosen.fold(0, (t, x) => t + x.durationMin);
 
+  /// This salon's running offers, by service.
+  Map<String, ServiceOffer> get offersByService => {for (final o in offersLive(salonId: id)) o.serviceId: o};
+
   List<Review> get reviews => engage.reviewsForSalon(id);
-  List<(StaffProfile, String)> get pros => team(id);
+  List<(StaffProfile, String)> get pros => team(id, branchId: branchId);
 
   @override
   void refresh() {

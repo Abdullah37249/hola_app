@@ -32,7 +32,7 @@ class _ProfileBody extends StatelessWidget {
     final b = context.watch<BookingsViewModel>();
     final f = context.watch<FeedbackViewModel>();
     final saved = b.me?.favourites.length ?? 0;
-    final open = f.items.where((x) => x.status == 'OPEN').length;
+    final open = f.items.where((x) => x.status == 'OPEN' && x.response == null).length;
     return BandView(
       role: 'customer',
       children: [
@@ -50,14 +50,24 @@ class _ProfileBody extends StatelessWidget {
                 onTap: () => context.read<SessionViewModel>().setTab('bookings'),
               ),
               MRow(icon: 'heart', tint: 1, title: tr('Saved salons'), sub: saved == 0 ? tr('None yet') : plural(saved, 'salon'), onTap: () => pushPage(context, const SavedSalonsPage())),
-              MRow(icon: 'msg', tint: 2, title: tr('Messages'), sub: tr('Chats with salons'), onTap: () => pushPage(context, const CustomerChatsPage())),
               MRow(
-                icon: 'alert',
-                tint: 3,
-                title: tr('Feedback & complaints'),
-                sub: open > 0 ? tr('{n} waiting for a reply', {'n': open}) : tr('Tell a salon what went well or wrong'),
-                onTap: () => pushPage(context, const MyFeedbackPage()),
+                icon: 'msg',
+                tint: 2,
+                title: tr('Messages'),
+                sub: switch (context.watch<ChatRepository>().unreadTotal) {
+                  0 => tr('Chats with salons'),
+                  final n => plural(n, 'unread message'),
+                },
+                onTap: () => pushPage(context, const MessagesPage()),
               ),
+              if (context.read<EngagementRepository>().complaintsOn)
+                MRow(
+                  icon: 'alert',
+                  tint: 3,
+                  title: tr('Feedback & complaints'),
+                  sub: open > 0 ? tr('{n} waiting for a reply', {'n': open}) : tr('Tell a salon what went well or wrong'),
+                  onTap: () => pushPage(context, const MyFeedbackPage()),
+                ),
             ],
           ),
           const SizedBox(height: 22),

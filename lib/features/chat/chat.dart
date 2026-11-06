@@ -1,2 +1,2 @@
-export 'views/chat_page.dart' show ChatPage, openSalonChat;
-export 'views/inbox_pages.dart' show ChatInboxPage, CustomerChatsPage;
+export 'views/chat_page.dart' show ChatPage, openChat, openSalonChat, openHolaChat;
+export 'views/inbox_pages.dart' show MessagesPage;

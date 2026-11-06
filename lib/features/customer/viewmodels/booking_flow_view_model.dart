@@ -104,7 +104,7 @@ class SlotPickerViewModel extends RepoViewModel with CustomerLookups {
 
 /// Three-step booking: professional → time → review.
 class BookingFlowViewModel extends SlotPickerViewModel {
-  BookingFlowViewModel(super.salons, super.auth, super.bookings, {required this.salonId, required super.branchId, required super.serviceIds});
+  BookingFlowViewModel(super.salons, super.auth, super.bookings, {required this.salonId, required super.branchId, required super.serviceIds, super.staffId});
   final String salonId;
 
   static const steps = ['Professional', 'Date & time', 'Review'];
@@ -115,9 +115,9 @@ class BookingFlowViewModel extends SlotPickerViewModel {
   Salon? get salonInfo => salons.salon(salonId);
   Branch? get branchInfo => salons.branch(branchId);
   List<ServiceItem> get services => [for (final id in serviceIds) ?salons.service(id)];
-  int get total => services.fold(0, (t, x) => t + x.price);
+  int get total => services.fold(0, (t, x) => t + priceAfterOffer(x));
   int get minutes => services.fold(0, (t, x) => t + x.durationMin);
-  List<(StaffProfile, String)> get pros => team(salonId);
+  List<(StaffProfile, String)> get pros => team(salonId, branchId: branchId);
   String? get staffName => staffId == null ? null : personName(staffId!);
 
   bool get canContinue => switch (step) {

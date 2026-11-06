@@ -15,6 +15,12 @@ import 'viewmodels/session_view_model.dart';
 /// Opens the screen a notification points at, for the signed-in role.
 void openLink(BuildContext context, NotifLink link) {
   final role = context.read<SessionViewModel>().account?.role;
+  // A salon paying this rider: the card is on the Deliveries home.
+  if ((link.type == 'collection' || link.type == 'return') && role == Role.rider) {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    context.read<SessionViewModel>().setTab('today');
+    return;
+  }
   final salonSide = role == Role.salonOwner || role == Role.salonStaff;
   final Widget? page = switch (link.type) {
     'appointment' =>
@@ -42,13 +48,16 @@ void openLink(BuildContext context, NotifLink link) {
           : null,
     'review' => salonSide ? const ReviewsPage() : _customerReview(context, link.id),
     'complaint' => salonSide ? const FeedbackInboxPage() : const MyFeedbackPage(),
-    'chat' => ChatPage(threadId: link.id, asSalon: salonSide),
+    'chat' => ChatPage(threadId: link.id),
+    'return' => role == Role.salonOwner || role == Role.salesOfficer ? ReturnDetailPage(id: link.id) : null,
     'leave' => role == Role.salonOwner ? const LeaveRequestsPage() : null,
     // A coupon HOLA sent the salon → its offers.
     'offers' => switch (context.read<SessionViewModel>().account?.salonId) {
       final id? when salonSide => OffersPage(salonId: id),
       _ => null,
     },
+    // A salon's offer on a service is free to use again → the customer's offers.
+    'service_offer' => salonSide ? null : const CustomerOffersPage(),
     // A credit payment confirmed, rejected or collected → the salon's statement.
     'payment' => switch (context.read<SessionViewModel>().account?.salonId) {
       final id? when salonSide => StatementPage(salonId: id),

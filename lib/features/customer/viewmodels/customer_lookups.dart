@@ -16,6 +16,18 @@ mixin CustomerLookups {
   Branch? branch(String id) => salons.branch(id);
   String personName(String id) => auth.account(id)?.name ?? tr('A professional');
 
+  // Salon offers
+  List<ServiceOffer> offersLive({String? salonId}) => salons.liveOffers(salonId: salonId);
+  ServiceItem? serviceInfo(String id) => salons.service(id);
+  String offerUse(ServiceOffer o) => salons.offerUse(o);
+  String offerHeldOn(ServiceOffer o) => salons.heldOn(o);
+
+  /// The offer that would apply to [serviceId] if booked now.
+  ServiceOffer? offerFor(String serviceId) => salons.offerFor(serviceId);
+
+  /// What [x] costs after the offer that would apply now.
+  int priceAfterOffer(ServiceItem x) => x.price - (offerFor(x.id)?.discountOn(x.price) ?? 0);
+
   /// "Gulberg III, Lahore" for the salon's first branch.
   String placeOf(String salonId) {
     final b = salons.branches(salonId).firstOrNull;
@@ -23,10 +35,14 @@ mixin CustomerLookups {
   }
 
   /// Bookable professionals with their account names.
-  List<(StaffProfile, String)> team(String salonId) => [
-    for (final p in salons.staff(salonId))
-      if (p.bookable) (p, personName(p.accountId)),
-  ];
+  /// With [branchId], only those who work at that branch.
+  List<(StaffProfile, String)> team(String salonId, {String? branchId}) {
+    final first = salons.branches(salonId).firstOrNull?.id;
+    return [
+      for (final p in salons.staff(salonId))
+        if (p.bookable && (branchId == null || (p.branchId ?? first) == branchId)) (p, personName(p.accountId)),
+    ];
+  }
 }
 
 /// Open/closed wording for a branch right now.

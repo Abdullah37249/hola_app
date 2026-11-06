@@ -76,7 +76,7 @@ class ComplaintCard extends StatelessWidget {
           children: [
             Expanded(child: Text(tr(x.topic), style: T.ttl(context))),
             const SizedBox(width: 8),
-            StatusBadge(x.status, label: x.status == 'OPEN' ? tr('Waiting for reply') : tr('Answered')),
+            StatusBadge(x.response == null && x.status == 'OPEN' ? 'OPEN' : 'RESOLVED', label: x.response == null && x.status == 'OPEN' ? tr('Waiting for reply') : tr('Answered')),
           ],
         ),
         Text('$salonName · ${ago(x.createdAt, now())}', style: T.cap(context)),

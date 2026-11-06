@@ -8,6 +8,7 @@ import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/ui.dart';
 import '../../notifications/notifications.dart';
+import 'offers_view.dart';
 import '../viewmodels/customer_lookups.dart';
 import '../viewmodels/discover_view_models.dart';
 import '../widgets/salon_cards.dart';
@@ -67,13 +68,41 @@ class _HomeBody extends StatelessWidget {
       onRefresh: vm.syncSalons,
       children: [
         ...staggered([
-          TopHead(eyebrow: dLabel(today), title: '${vm.greeting}, ${vm.me?.firstName ?? ''}', oneLine: true, actions: const [NotificationBell()]),
+          TopHead(eyebrow: dLabel(today), title: '${vm.greeting},\n${vm.me?.firstName ?? ''}', oneLine: true, actions: const [NotificationBell()]),
         ]),
         const SizedBox(height: 18),
         // The search bar sits across the header's edge, at the same height as
         // every other screen; the next visit follows on the page.
         BandMark(match: true, child: Reveal(i: 1, child: search)),
         if (next != null) ...[const SizedBox(height: 22), Reveal(i: 2, child: _NextVisit(next))],
+        // Salons' running offers, swiped through; all of them on their own page.
+        if (vm.offers case final offers when offers.isNotEmpty) ...[
+          const SizedBox(height: 28),
+          Reveal(
+            i: 3,
+            child: SecHead(tr('Offers'), action: offers.length > 1 ? tr('See all') : null, onAction: () => pushPage(context, const CustomerOffersPage())),
+          ),
+          const SizedBox(height: 12),
+          Reveal(
+            i: 3,
+            child: offers.length == 1
+                ? offerCardOf(context, vm, offers.first)
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.none,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final o in offers)
+                          Padding(
+                            padding: const EdgeInsetsDirectional.only(end: 12),
+                            child: SizedBox(width: MediaQuery.sizeOf(context).width - 72, child: offerCardOf(context, vm, o)),
+                          ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
         ...staggered([
           const SizedBox(height: 28),
           SecHead(tr('Browse by service')),
@@ -119,10 +148,10 @@ class _HomeBody extends StatelessWidget {
             const SizedBox(height: 28),
             Reveal(
               i: 8,
-              child: SecHead(tr('Top rated'), action: tr('See all'), onAction: () => _browse(context, null)),
+              child: SecHead(tr('Top rated salons'), action: tr('See all'), onAction: () => _browse(context, null)),
             ),
             const SizedBox(height: 12),
-            ...staggered([for (final s in vm.topRated.take(3)) Padding(padding: const EdgeInsets.only(bottom: 24), child: SalonCard(s))], 9),
+            ...staggered([for (final s in vm.topRated) Padding(padding: const EdgeInsets.only(bottom: 24), child: SalonCard(s))], 9),
           ],
         ],
       ],
@@ -294,7 +323,7 @@ class _ReviewNudge extends StatelessWidget {
     final s = vm.salon(a.salonId);
     final c = context.c;
     final name = s?.name ?? tr('the salon');
-    void rate() => showReviewSheet(context, name, (stars, text) => vm.addReview(a.id, stars, text));
+    void rate() => showReviewSheet(context, name, (stars, text, photos) => vm.addReview(a.id, stars, text, photos));
     return HCard(
       onTap: rate,
       padding: const EdgeInsets.all(16),

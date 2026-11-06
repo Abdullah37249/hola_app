@@ -93,10 +93,33 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final title = tr(n.title, n.args), body = tr(n.body, n.args);
+    return LayoutBuilder(
+      builder: (context, box) {
+        // The text column: row width less padding, icon and gaps (and the unread dot).
+        final textW = box.maxWidth - 28 - 38 - 12 - (n.read ? 0 : 17);
+        final cut = (TextPainter(
+          text: TextSpan(text: body, style: T.sm(context)),
+          maxLines: 3,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: textW > 0 ? textW : 0)).didExceedMaxLines;
+        return _tile(context, c, title, body, cut);
+      },
+    );
+  }
+
+  Widget _tile(BuildContext context, HolaColors c, String title, String body, bool cut) {
     return InkWell(
       onTap: () {
         Sfx.tap();
         vm.open(n);
+        // Cut off: show the whole notification first, with a button to its screen.
+        if (cut) {
+          final link = n.link;
+          showFullMessage(context, title: title, message: body, icon: _icon(n.icon), action: link == null ? null : (tr('Open'), () => openLink(context, link)));
+          return;
+        }
         if (n.link != null) openLink(context, n.link!);
       },
       child: Padding(
@@ -121,7 +144,7 @@ class _Row extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          tr(n.title, n.args),
+                          title,
                           style: T.ttl(context).copyWith(fontWeight: n.read ? FontWeight.w500 : FontWeight.w600, color: n.read ? c.body : c.ink),
                         ),
                       ),
@@ -134,7 +157,7 @@ class _Row extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    tr(n.body, n.args),
+                    body,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: T.sm(context).copyWith(color: c.muted),

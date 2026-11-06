@@ -15,22 +15,39 @@ class Root extends StatefulWidget {
 }
 
 class _RootState extends State<Root> {
-  bool _splash = true;
+  bool _splash = true, _offering = false;
 
   @override
   Widget build(BuildContext context) {
     final s = context.watch<SessionViewModel>();
+    // Just signed in with a password: ask once about fingerprint sign-in.
+    if (s.offerFingerprint && s.splashDone && !_offering && !s.locked) {
+      _offering = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (mounted) await offerFingerprint(context);
+        _offering = false;
+      });
+    }
     final Widget body = !s.ready
         ? const SizedBox()
         : !s.signedIn
         ? const WelcomeView(key: ValueKey('welcome'))
+        : s.locked
+        ? const FingerprintLockView(key: ValueKey('locked'))
         : s.needsSalonSetup
         ? const SalonSetupPage(key: ValueKey('setup'))
         : Shell(key: ValueKey('shell-${s.account!.id}'));
     return Stack(
       children: [
         AnimatedSwitcher(duration: const Duration(milliseconds: 420), child: body),
-        if (_splash) SplashView(ready: s.ready, onDone: () => setState(() => _splash = false)),
+        if (_splash)
+          SplashView(
+            ready: s.ready,
+            onDone: () {
+              setState(() => _splash = false);
+              s.splashFinished();
+            },
+          ),
       ],
     );
   }

@@ -30,15 +30,27 @@ class Stop {
 
 /// The signed-in rider's deliveries, grouped by what they need to do next.
 class DeliveriesViewModel extends RepoViewModel {
-  DeliveriesViewModel(this._trade, this._salons, this._auth) : super(_trade) {
+  DeliveriesViewModel(this._trade, this._salons, this._auth, {ReturnRepository? returns}) : _returns = returns, super(_trade) {
     _trade.syncDeliveries();
+    _trade.syncCollections();
+    if (_returns != null) Future.microtask(_returns.syncPickups);
   }
+  final ReturnRepository? _returns;
+
+  /// Returned goods HOLA sent this rider to collect from salons.
+  List<ReturnPickupTask> get pickups => _returns?.pickups() ?? const [];
+  Future<void> collectPickup(ReturnPickupTask p) => _returns!.collectPickup(p.returnId);
+
+  /// Salons that chose this rider to hand their HOLA payment to.
+  List<CollectionRequest> get collections => _trade.collections();
+  Future<void> confirmCollection(CollectionRequest c, int amount) => _trade.confirmCollection(c.id, amount);
+  Future<void> declineCollection(CollectionRequest c, String reason) => _trade.declineCollection(c.id, reason);
 
   /// A credit payment the salon hands over with this delivery, if any.
   CreditCollection? collectFor(TradeOrder o) => o.status == OrderStatus.dispatched || o.status == OrderStatus.outForDelivery ? _trade.creditCollectionFor(o.id) : null;
 
   /// Pull-to-refresh: fetch the latest assignments from HOLA.
-  Future<void> pull() => _trade.syncDeliveries();
+  Future<void> pull() => Future.wait([_trade.syncDeliveries(), _trade.syncCollections(), if (_returns != null) _returns.syncPickups()]);
   final TradeRepository _trade;
   final SalonRepository _salons;
   final AuthRepository _auth;

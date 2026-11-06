@@ -7,6 +7,7 @@ import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/ui.dart';
 import '../views/booking_detail_view.dart';
+import '../views/booking_flow_view.dart';
 import 'salon_cards.dart';
 
 /// Customer-facing status badge (uses customer wording where it differs).
@@ -60,9 +61,26 @@ class BookingCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(rs(a.price), style: T.ttl(context)),
+            Text(rsShort(a.price), style: T.ttl(context)),
           ],
         ),
+        // A past visit: book the same again in one tap.
+        if (ApptStatus.finished.contains(a.status) && s != null && s.isListed) ...[
+          const HDivider(),
+          Tap(
+            onTap: () => pushPage(context, rebookPage(context.read<SalonRepository>(), a)),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(tr('Same services, same professional'), style: T.sm(context).copyWith(color: c.muted)),
+                ),
+                HIcon('again', size: 16, color: c.brandText),
+                const SizedBox(width: 6),
+                Text(tr('Book again'), style: T.link(context)),
+              ],
+            ),
+          ),
+        ],
         if (a.status == ApptStatus.completed && !a.reviewed) ...[
           const HDivider(),
           Row(

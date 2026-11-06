@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import '../../../domain/repositories/repositories.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+
+import 'clients_view.dart';
 
 import '../../../core/utils/clock.dart';
 import '../../../core/utils/format.dart';
@@ -12,11 +15,23 @@ import '../viewmodels/salon_view_model.dart';
 import '../widgets/salon_widgets.dart';
 
 /// One appointment from the salon's side, with every action its status allows.
-class AppointmentDetailPage extends StatelessWidget {
+class AppointmentDetailPage extends StatefulWidget {
   final String id;
   const AppointmentDetailPage({super.key, required this.id});
   @override
-  Widget build(BuildContext context) => SalonScope(child: _Detail(id));
+  State<AppointmentDetailPage> createState() => _AppointmentDetailPageState();
+}
+
+class _AppointmentDetailPageState extends State<AppointmentDetailPage> {
+  @override
+  void initState() {
+    super.initState();
+    // HOLA's timeline: who confirmed, moved or cancelled it, and why.
+    context.read<BookingRepository>().syncBookingHistory(widget.id);
+  }
+
+  @override
+  Widget build(BuildContext context) => SalonScope(child: _Detail(widget.id));
 }
 
 class _Detail extends StatelessWidget {
@@ -35,7 +50,7 @@ class _Detail extends StatelessWidget {
       );
     }
     final branch = vm.branch(a.branchId);
-    final thread = vm.threadWith(a.customerId);
+    final chat = vm.canMessage(a);
     final first = a.customerName.split(' ').first;
 
     return HPage(
@@ -68,26 +83,28 @@ class _Detail extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          if (a.customerPhone.isNotEmpty || thread != null)
+          if (a.customerPhone.isNotEmpty || chat)
             Row(
               children: [
                 if (a.customerPhone.isNotEmpty)
                   Expanded(
                     child: HButton(tr('Call'), icon: 'phone', kind: BtnKind.secondary, small: true, onTap: () => _call(context, a)),
                   ),
-                if (a.customerPhone.isNotEmpty && thread != null) const SizedBox(width: 10),
-                if (thread != null)
+                if (a.customerPhone.isNotEmpty && chat) const SizedBox(width: 10),
+                if (chat)
                   Expanded(
                     child: HButton(
                       tr('Message'),
                       icon: 'msg',
                       kind: BtnKind.secondary,
                       small: true,
-                      onTap: () => pushPage(context, ChatPage(threadId: thread.id, asSalon: true)),
+                      onTap: () => openChat(context, salonId: a.salonId, customerId: a.customerId, appointmentId: a.id),
                     ),
                   ),
               ],
             ),
+          const SizedBox(height: 12),
+          _HistoryLink(a),
           const SizedBox(height: 20),
           // When, at a glance.
           HCard(
@@ -136,6 +153,7 @@ class _Detail extends StatelessWidget {
               if (vm.branches.length > 1 && branch != null) ...[KV(tr('Branch'), branch.name), const HDivider()],
               for (final n in a.serviceNames) Text(n, style: T.ttl(context)),
               const HDivider(),
+              if (a.discount > 0) KV(tr('Offer discount'), '−${rs(a.discount)}', vColor: context.c.ok),
               KV(tr('Total, paid at salon'), rs(a.price)),
             ]),
           ),
@@ -197,7 +215,7 @@ class _Detail extends StatelessWidget {
       final r = await askText(
         context,
         title: tr('Cancel this appointment?'),
-        body: tr('{name} will be notified.', {'name': a.customerName}),
+        body: a.customerId == null ? null : tr('{name} will be notified.', {'name': a.customerName}),
         label: tr('Reason'),
         hint: tr('e.g. Stylist unwell'),
         confirm: tr('Cancel appointment'),
@@ -232,8 +250,8 @@ class _Detail extends StatelessWidget {
                       }
                     },
                   )
-                : a.startsAt.difference(now()).inMinutes >= 120
-                ? HButton(tr('Check-in opens {time}', {'time': fmtTime(a.startsAt.subtract(const Duration(hours: 2)))}), kind: BtnKind.soft, block: true, onTap: null)
+                : a.startsAt.difference(now()).inMinutes > vm.checkInEarlyMin
+                ? HButton(tr('Check-in opens {time}', {'time': fmtTime(a.startsAt.subtract(Duration(minutes: vm.checkInEarlyMin)))}), kind: BtnKind.soft, block: true, onTap: null)
                 : HButton(
                     tr('Check in {name}', {'name': a.customerName.split(' ').first}),
                     icon: 'check',
@@ -429,5 +447,35 @@ class _RescheduleState extends State<_Reschedule> {
               },
       ),
     ]);
+  }
+}
+
+/// "3 visits · Rs 4,500 — see history": this client's record at the salon.
+class _HistoryLink extends StatelessWidget {
+  const _HistoryLink(this.a);
+  final Appointment a;
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<SalonViewModel>();
+    final key = vm.clientKeyOf(a);
+    final cl = vm.client(key);
+    if (cl == null) return const SizedBox();
+    final sub = cl.completed == 0
+        ? tr('First visit')
+        : [
+            plural(cl.completed, 'visit'),
+            if (cl.spent > 0) rsShort(cl.spent),
+            if (cl.lastVisit != null) tr('last {day}', {'day': dLabel(cl.lastVisit!)}),
+          ].join(' · ');
+    return Group(
+      children: [
+        MRow(
+          icon: 'users',
+          title: tr('Client history'),
+          sub: sub,
+          onTap: () => pushPage(context, ClientHistoryPage(clientKey: key)),
+        ),
+      ],
+    );
   }
 }

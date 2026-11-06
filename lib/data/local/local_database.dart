@@ -21,6 +21,7 @@ class LocalDatabase extends ChangeNotifier {
   final salons = <Salon>[];
   final branches = <Branch>[];
   final services = <ServiceItem>[];
+  final offers = <ServiceOffer>[];
   final appointments = <Appointment>[];
   final reviews = <Review>[];
   final complaints = <Complaint>[];
@@ -30,6 +31,8 @@ class LocalDatabase extends ChangeNotifier {
   final products = <Product>[];
   final orders = <TradeOrder>[];
   final credit = <CreditEntry>[];
+  final returns = <ReturnRequest>[];
+  final productReviews = <ProductReview>[];
   final handovers = <CashHandover>[];
   final visits = <Visit>[];
   final trainings = <Training>[];
@@ -80,6 +83,11 @@ class LocalDatabase extends ChangeNotifier {
     notifications.add(AppNotification(id: newId(), userId: userId, title: title, body: body, args: args, icon: icon, at: now(), link: link));
   }
 
+  /// A notice about [link] this user got in the last two minutes: a push and
+  /// the next sync can both report the same change.
+  AppNotification? recentAbout(String userId, NotifLink? link) =>
+      link == null ? null : notifications.where((n) => n.userId == userId && n.link?.type == link.type && n.link?.id == link.id && now().difference(n.at).inSeconds < 120).lastOrNull;
+
   /// Notifies the owner and every staff member of a salon.
   void notifySalon(String salonId, String title, String body, {Map<String, String> args = const {}, String icon = 'bell', NotifLink? link, String? onlyStaffId}) {
     final s = salons.where((x) => x.id == salonId).firstOrNull;
@@ -110,6 +118,7 @@ class LocalDatabase extends ChangeNotifier {
     'salons': [for (final x in salons) x.toJson()],
     'branches': [for (final x in branches) x.toJson()],
     'services': [for (final x in services) x.toJson()],
+    'offers': [for (final x in offers) x.toJson()],
     'appointments': [for (final x in appointments) x.toJson()],
     'reviews': [for (final x in reviews) x.toJson()],
     'complaints': [for (final x in complaints) x.toJson()],
@@ -119,6 +128,8 @@ class LocalDatabase extends ChangeNotifier {
     'products': [for (final x in products) x.toJson()],
     'orders': [for (final x in orders) x.toJson()],
     'credit': [for (final x in credit) x.toJson()],
+    'returns': [for (final x in returns) x.toJson()],
+    'productReviews': [for (final x in productReviews) x.toJson()],
     'handovers': [for (final x in handovers) x.toJson()],
     'visits': [for (final x in visits) x.toJson()],
     'trainings': [for (final x in trainings) x.toJson()],
@@ -137,6 +148,7 @@ class LocalDatabase extends ChangeNotifier {
     salons.addAll(l('salons', Salon.fromJson));
     branches.addAll(l('branches', Branch.fromJson));
     services.addAll(l('services', ServiceItem.fromJson));
+    offers.addAll(l('offers', ServiceOffer.fromJson));
     appointments.addAll(l('appointments', Appointment.fromJson));
     reviews.addAll(l('reviews', Review.fromJson));
     complaints.addAll(l('complaints', Complaint.fromJson));
@@ -146,6 +158,8 @@ class LocalDatabase extends ChangeNotifier {
     products.addAll(l('products', Product.fromJson));
     orders.addAll(l('orders', TradeOrder.fromJson));
     credit.addAll(l('credit', CreditEntry.fromJson));
+    returns.addAll(l('returns', ReturnRequest.fromJson));
+    productReviews.addAll(l('productReviews', ProductReview.fromJson));
     handovers.addAll(l('handovers', CashHandover.fromJson));
     visits.addAll(l('visits', Visit.fromJson));
     trainings.addAll(l('trainings', Training.fromJson));

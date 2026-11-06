@@ -14,6 +14,8 @@ import '../../../shared/widgets/ui.dart';
 import '../../chat/chat.dart';
 import '../viewmodels/customer_lookups.dart';
 import '../viewmodels/salon_view_model.dart';
+import '../widgets/offer_card.dart';
+import '../widgets/review_photos.dart';
 import '../widgets/salon_cards.dart';
 import 'booking_flow_view.dart';
 
@@ -21,10 +23,15 @@ import 'booking_flow_view.dart';
 /// reviews and policies. Selecting services opens a buy bar into booking.
 class SalonPage extends StatelessWidget {
   final String id;
-  const SalonPage({super.key, required this.id});
+
+  /// A service to start with selected (e.g. booked from an offer).
+  final String? select;
+  const SalonPage({super.key, required this.id, this.select});
   @override
-  Widget build(BuildContext context) =>
-      ChangeNotifierProvider(create: (c) => SalonViewModel(c.read<SalonRepository>(), c.read<AuthRepository>(), c.read<EngagementRepository>(), id), child: const _SalonBody());
+  Widget build(BuildContext context) => ChangeNotifierProvider(
+    create: (c) => SalonViewModel(c.read<SalonRepository>(), c.read<AuthRepository>(), c.read<EngagementRepository>(), id, select: select),
+    child: const _SalonBody(),
+  );
 }
 
 class _SalonBody extends StatefulWidget {
@@ -131,8 +138,8 @@ class _SalonBodyState extends State<_SalonBody> {
                           children: [
                             if (b != null) ...[Expanded(child: _Action(tr('Directions'), 'nav', onTap: () => _directions(s, b))), const SizedBox(width: 8)],
                             if (s.phone.isNotEmpty) ...[Expanded(child: _Action(tr('Call'), 'phone', onTap: () => showCallSheet(context, s.name, s.phone))), const SizedBox(width: 8)],
-                            // In-app chat isn't on the HOLA server yet, so HOLA salons are reached by phone.
-                            if (!s.hola) Expanded(child: _Action(tr('Message'), 'msg', onTap: () => openSalonChat(context, s.id))),
+                            // HOLA salons are reached in-app once HOLA's chat is live; until then by phone.
+                            if (!s.hola || context.read<ChatRepository>().live) Expanded(child: _Action(tr('Message'), 'msg', onTap: () => openSalonChat(context, s.id))),
                           ],
                         ),
                         const SizedBox(height: 24),
@@ -279,6 +286,7 @@ class _Menu extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final menu = vm.menu;
+    final offers = vm.offersByService;
     if (menu.isEmpty) {
       return Padding(
         padding: const EdgeInsets.only(top: 24),
@@ -311,10 +319,7 @@ class _Menu extends StatelessWidget {
                           Text(x.name, style: T.ttl(context).copyWith(color: vm.selected.contains(x.id) ? c.brandText : c.ink)),
                           Text([fmtDur(x.durationMin), if (x.description.isNotEmpty) x.description].join(' · '), style: T.sm(context).copyWith(color: c.muted)),
                           const SizedBox(height: 2),
-                          Text(
-                            rs(x.price),
-                            style: T.sm(context).copyWith(color: c.ink, fontWeight: FontWeight.w600),
-                          ),
+                          _Price(x, offers[x.id], vm),
                         ],
                       ),
                     ),
@@ -324,6 +329,67 @@ class _Menu extends StatelessWidget {
               ),
             ),
         ],
+      ],
+    );
+  }
+}
+
+/// A service's price; with a running offer, the old price struck through,
+/// the new one, and the offer (or why this customer can't use it again).
+class _Price extends StatelessWidget {
+  const _Price(this.x, this.offer, this.vm);
+  final ServiceItem x;
+  final ServiceOffer? offer;
+  final SalonViewModel vm;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final o = offer;
+    final plain = Text(
+      rs(x.price),
+      style: T.sm(context).copyWith(color: c.ink, fontWeight: FontWeight.w600),
+    );
+    if (o == null) return plain;
+    final use = vm.offerUse(o);
+    final tag = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(gradient: offerGradient, borderRadius: BorderRadius.circular(6)),
+      child: Text(
+        '${offText(o)} · ${tr('until {date}', {'date': dayMonth(o.lastDay)})}',
+        style: T.cap(context).copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+      ),
+    );
+    if (use != OfferUse.none) {
+      final held = vm.offerHeldOn(o);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          plain,
+          Text(
+            use == OfferUse.used
+                ? tr('You have already used the {off} offer', {'off': offText(o)})
+                : held.isEmpty
+                ? tr('{off} offer held for one of your bookings', {'off': offText(o)})
+                : tr('{off} offer held for {code}', {'off': offText(o), 'code': held}),
+            style: T.cap(context),
+          ),
+        ],
+      );
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(
+          rs(x.price),
+          style: T.sm(context).copyWith(color: c.muted, decoration: TextDecoration.lineThrough),
+        ),
+        Text(
+          rs(x.price - o.discountOn(x.price)),
+          style: T.sm(context).copyWith(color: c.ink, fontWeight: FontWeight.w700),
+        ),
+        tag,
       ],
     );
   }
@@ -464,6 +530,7 @@ class ReviewTile extends StatelessWidget {
           const SizedBox(height: 8),
           Stars(r.stars),
           if (r.text.isNotEmpty) ...[const SizedBox(height: 6), Text(r.text, style: T.body(context))],
+          if (r.photos.isNotEmpty) ...[const SizedBox(height: 10), ReviewPhotoStrip(r)],
           if (r.reply != null) ...[
             const SizedBox(height: 10),
             Container(

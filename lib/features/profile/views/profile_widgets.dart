@@ -3,14 +3,17 @@ import 'package:provider/provider.dart';
 
 import '../../../app/viewmodels/session_view_model.dart';
 import '../../../core/utils/sfx.dart';
+import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
 import '../../notifications/notifications.dart';
 import '../viewmodels/profile_view_models.dart';
 import 'account_pages.dart';
+import '../../auth/auth.dart' show toggleFingerprint;
 import '../../legal/views/legal_page.dart';
 import 'permissions_page.dart';
+import '../../../core/security/biometrics.dart' show bio, bioIcon;
 
 /// Identity card for Profile / More tabs. Tap to edit.
 class AccountCard extends StatelessWidget {
@@ -88,6 +91,27 @@ class AppSettingsGroup extends StatelessWidget {
           children: [
             MRow(icon: 'bell', title: tr('Notifications'), sub: unread == 0 ? tr('All caught up') : tr('{n} unread', {'n': unread}), onTap: () => pushPage(context, const NotificationsPage())),
             MRow(icon: 'shield', title: tr('Change password'), onTap: () => pushPage(context, const ChangePasswordPage())),
+            if (s.bioAvailable && context.read<AuthRepository>().usesServer)
+              MRow(
+                icon: bioIcon,
+                title: bio(tr('Fingerprint sign-in')),
+                sub: s.fingerprintOn ? bio(tr('On: open HOLA with your fingerprint')) : tr('Off: sign in with your password'),
+                trailing: HSwitch(on: s.fingerprintOn, onChanged: (v) => toggleFingerprint(context, v)),
+              ),
+            if (s.account?.role == Role.customer)
+              MRow(
+                icon: 'clock',
+                title: tr('Booking reminders'),
+                sub: tr('The day before and 2 hours before each visit'),
+                trailing: ListenableBuilder(
+                  listenable: context.read<EngagementRepository>().changes,
+                  builder: (context, _) => HSwitch(
+                    on: context.read<EngagementRepository>().remindersOn,
+                    onChanged: (v) =>
+                        attempt(() => context.read<EngagementRepository>().setReminders(v), success: v ? tr('Booking reminders on') : tr('Booking reminders off'), icon: v ? 'bell' : 'x'),
+                  ),
+                ),
+              ),
             MRow(icon: 'check', title: tr('Permissions'), sub: tr('Notifications, location, photos'), onTap: () => pushPage(context, const PermissionsPage())),
             MRow(
               icon: 'vol',

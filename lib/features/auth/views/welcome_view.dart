@@ -9,6 +9,8 @@ import '../../../shared/widgets/logo.dart';
 import '../../../shared/widgets/ui.dart';
 import '../viewmodels/auth_view_models.dart';
 import '../widgets/auth_widgets.dart';
+import '../../../app/viewmodels/session_view_model.dart';
+import 'fingerprint_views.dart';
 import 'forgot_password_view.dart';
 import 'sign_up_view.dart';
 
@@ -51,12 +53,14 @@ class _SignInState extends State<_SignIn> {
     FocusScope.of(context).unfocus();
     String? name;
     final nav = Navigator.of(context);
+    final session = context.read<SessionViewModel>();
     final ok = await attempt(() async => name = (await vm.signIn(email.text, pass.text)).firstName, errors: errors);
     if (ok) TextInput.finishAutofillContext(); // offer to save the password
     if (ok && widget.rider) nav.popUntil((r) => r.isFirst);
     if (ok) {
       Sfx.success();
       Fx.toast(tr('Welcome back, {name}', {'name': name}));
+      session.passwordSignedIn(); // first time: offer fingerprint sign-in
     }
   }
 
@@ -110,7 +114,16 @@ class _SignInState extends State<_SignIn> {
                   ),
                 ],
               ),
-              HButton(tr('Sign in'), block: true, onTap: () => _submit(vm)),
+              // Fingerprint sign-in saved on this phone: its icon sits beside Sign in.
+              // The fingerprint icon is always there; before any account has
+              // turned fingerprint sign-in on, it explains how to.
+              Row(
+                children: [
+                  Expanded(child: HButton(tr('Sign in'), block: true, onTap: () => _submit(vm))),
+                  const SizedBox(width: 10),
+                  FingerprintSignInButton(riders: widget.rider, onSignedIn: widget.rider ? () => Navigator.of(context).popUntil((r) => r.isFirst) : null),
+                ],
+              ),
             ],
           ),
         ),

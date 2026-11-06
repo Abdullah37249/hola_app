@@ -8,11 +8,12 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+// FragmentActivity: Android's fingerprint prompt (local_auth) needs it.
+class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // HOLA's server sends every push on "hola_default" with high priority.

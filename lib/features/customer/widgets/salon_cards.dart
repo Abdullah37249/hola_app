@@ -55,7 +55,10 @@ class OpenLine extends StatelessWidget {
 /// Large salon card: cover, name + rating, one meta line, open state + price.
 class SalonCard extends StatelessWidget {
   final Salon s;
-  const SalonCard(this.s, {super.key});
+
+  /// How far away it is, when the customer shared their location.
+  final double? km;
+  const SalonCard(this.s, {super.key, this.km});
   @override
   Widget build(BuildContext context) {
     final c = context.c;
@@ -85,7 +88,7 @@ class SalonCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            [place, cats.take(3).join(', ')].where((x) => x.isNotEmpty).join(' · '),
+            [if (km != null) kmLabel(km!), place, cats.take(3).join(', ')].where((x) => x.isNotEmpty).join(' · '),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: T.sm(context).copyWith(color: c.muted),
@@ -94,14 +97,16 @@ class SalonCard extends StatelessWidget {
           Row(
             children: [
               Flexible(child: OpenLine(b)),
-              Flexible(
-                child: Text(
-                  '  ·  ${tr('from {price}', {'price': rs(repo.fromPrice(s.id))})}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: T.sm(context).copyWith(color: c.ink),
+              // No price until the salon has a menu (never "from Rs 0").
+              if (repo.fromPrice(s.id) > 0)
+                Flexible(
+                  child: Text(
+                    '  ·  ${tr('from {price}', {'price': rsShort(repo.fromPrice(s.id))})}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: T.sm(context).copyWith(color: c.ink),
+                  ),
                 ),
-              ),
             ],
           ),
         ],
@@ -143,7 +148,7 @@ class SalonMini extends StatelessWidget {
             Text(
               [
                 place,
-                tr('from {price}', {'price': rs(repo.fromPrice(s.id))}),
+                if (repo.fromPrice(s.id) > 0) tr('from {price}', {'price': rsShort(repo.fromPrice(s.id))}),
               ].where((x) => x.isNotEmpty).join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -205,3 +210,6 @@ class CategoryTile extends StatelessWidget {
     );
   }
 }
+
+/// "850 m" or "2.3 km" away.
+String kmLabel(double km) => km < 1 ? tr('{m} m away', {'m': (km * 1000 / 10).round() * 10}) : tr('{km} km away', {'km': km < 10 ? km.toStringAsFixed(1) : km.round()});

@@ -44,31 +44,60 @@ abstract class TokenStore {
   Future<Tokens?> read();
   Future<void> write(Tokens t);
   Future<void> clear();
+
+  /// Sessions kept for fingerprint sign-in after signing out, one per account.
+  Future<Tokens?> readParked(String accountId);
+  Future<void> writeParked(String accountId, Tokens t);
+  Future<void> clearParked(String accountId);
 }
 
 class SecureTokenStore implements TokenStore {
-  static const _key = 'hola.tokens';
+  static const _key = 'hola.tokens', _parked = 'hola.tokens.fingerprint';
+  static String _for(String accountId) => '$_parked.$accountId';
   final _s = const FlutterSecureStorage();
-  @override
-  Future<Tokens?> read() async {
-    final v = await _s.read(key: _key);
+  Future<Tokens?> _get(String k) async {
+    final v = await _s.read(key: k);
     return v == null ? null : Tokens.fromJson(jsonDecode(v) as J);
   }
 
   @override
+  Future<Tokens?> read() => _get(_key);
+  @override
   Future<void> write(Tokens t) => _s.write(key: _key, value: jsonEncode(t.toJson()));
   @override
   Future<void> clear() => _s.delete(key: _key);
+  @override
+  Future<Tokens?> readParked(String accountId) async {
+    // Builds before per-account fingerprints kept one session under the bare key.
+    final legacy = await _get(_parked);
+    if (legacy != null) {
+      await _s.write(key: _for(accountId), value: jsonEncode(legacy.toJson()));
+      await _s.delete(key: _parked);
+    }
+    return _get(_for(accountId));
+  }
+
+  @override
+  Future<void> writeParked(String accountId, Tokens t) => _s.write(key: _for(accountId), value: jsonEncode(t.toJson()));
+  @override
+  Future<void> clearParked(String accountId) => _s.delete(key: _for(accountId));
 }
 
 class MemoryTokenStore implements TokenStore {
   Tokens? t;
+  final parked = <String, Tokens>{};
   @override
   Future<Tokens?> read() async => t;
   @override
   Future<void> write(Tokens v) async => t = v;
   @override
   Future<void> clear() async => t = null;
+  @override
+  Future<Tokens?> readParked(String accountId) async => parked[accountId];
+  @override
+  Future<void> writeParked(String accountId, Tokens v) async => parked[accountId] = v;
+  @override
+  Future<void> clearParked(String accountId) async => parked.remove(accountId);
 }
 
 /// Thin JSON client for the HOLA API: bearer tokens, one-at-a-time refresh
@@ -140,6 +169,78 @@ class HolaApi {
     await clearSession();
   }
 
+  // ── fingerprint sign-in ──
+  // Signing out with fingerprint sign-in on keeps the session (in the phone's
+  // encrypted storage) instead of ending it; a fingerprint brings it back.
+  // The password is never stored.
+
+  /// Signs out on this phone but keeps [accountId]'s session for its
+  /// fingerprint sign-in.
+  Future<void> parkSession(String accountId) async {
+    final t = await _current();
+    if (t == null) return;
+    try {
+      await beforeLogout?.call(); // no pushes for a signed-out phone
+    } catch (_) {}
+    await _store.writeParked(accountId, t);
+    await clearSession();
+  }
+
+  Future<bool> hasParked(String accountId) async {
+    try {
+      return await _store.readParked(accountId) != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Brings [accountId]'s kept session back and renews it with HOLA. Throws
+  /// [ApiError] 401 when HOLA has ended it (it's then forgotten), or a network
+  /// error (it's kept, renewed if the renewal got through, for another try).
+  Future<void> resumeParked(String accountId) async {
+    final t = await _store.readParked(accountId);
+    if (t == null) throw const ApiError(401, 'UNAUTHENTICATED', 'No saved session');
+    _tokens = t;
+    _loaded = true;
+    try {
+      await refresh();
+    } on ApiError catch (e) {
+      if (e.status == 401) await _store.clearParked(accountId);
+      _tokens = null;
+      rethrow;
+    } catch (_) {
+      _tokens = null;
+      rethrow;
+    }
+    // Refresh tokens rotate: keep the new one until sign-in has finished.
+    await _store.writeParked(accountId, _tokens!);
+  }
+
+  /// Sign-in finished (or a fresh password sign-in): the kept copy goes.
+  Future<void> forgetParked(String accountId) async {
+    try {
+      await _store.clearParked(accountId);
+    } catch (_) {}
+  }
+
+  /// Fingerprint sign-in turned off: forget the kept session, and end it on
+  /// HOLA when no one is signed in on this phone.
+  Future<void> dropParked(String accountId) async {
+    Tokens? t;
+    try {
+      t = await _store.readParked(accountId);
+    } catch (_) {}
+    if (t == null) return;
+    await forgetParked(accountId);
+    if (await hasSession) return;
+    _tokens = t;
+    _loaded = true;
+    try {
+      await post('/auth/logout', const {});
+    } catch (_) {}
+    await clearSession();
+  }
+
   Future<void> _refresh() async {
     final t = await _current();
     if (t == null) throw const ApiError(401, 'UNAUTHENTICATED', 'Not signed in');
@@ -171,6 +272,26 @@ class HolaApi {
     final id = f['id'] as String;
     await _authed('PUT', '/files/$id/content', _Bytes(bytes, contentType), true);
     return id;
+  }
+
+  /// Raw bytes of a file (e.g. GET /files/{id}/content), signed in.
+  Future<List<int>> bytes(String path) async {
+    Future<http.Response> go() async {
+      final req = http.Request('GET', Uri.parse('$base$path'));
+      if (_tokens != null) req.headers['authorization'] = 'Bearer ${_tokens!.access}';
+      return http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 30)));
+    }
+
+    final t = await _current();
+    if (t == null) throw const ApiError(401, 'UNAUTHENTICATED', 'Not signed in');
+    if (t.accessExpires.isBefore(DateTime.now().add(const Duration(seconds: 30)))) await refresh();
+    var res = await go();
+    if (res.statusCode == 401) {
+      await refresh();
+      res = await go();
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) return res.bodyBytes;
+    throw ApiError(res.statusCode, 'HTTP_${res.statusCode}', 'Could not load the file');
   }
 
   Future<dynamic> delete(String path) => _authed('DELETE', path, null, true);
@@ -252,11 +373,14 @@ DomainError apiToDomain(Object e, {Map<String, String> fieldNames = const {}}) {
     'NETWORK' => DomainError(tr('Can’t reach HOLA. Check your connection and try again.')),
     'TIMEOUT' => DomainError(tr('HOLA is taking too long to answer. Try again.')),
     'INVALID_CREDENTIALS' => DomainError(tr('Email or password is incorrect.'), field: 'password'),
+    // 5 wrong passwords in a row: HOLA locks sign-in for 15 minutes.
+    'ACCOUNT_LOCKED' || 'LOGIN_LOCKED' => DomainError(tr('Too many failed login attempts. Please try again after 15 minutes.'), field: 'password'),
     'ACCOUNT_SUSPENDED' => DomainError(tr('This account is suspended. Contact HOLA.')),
     'EMAIL_TAKEN' => DomainError(tr('An account with this email already exists.'), field: 'email'),
     'SESSION_EXPIRED' || 'UNAUTHENTICATED' => DomainError(tr('Please sign in again.')),
     'VALIDATION_FAILED' => _validation(e, fieldNames),
-    _ when e.status == 429 => DomainError(tr('Too many tries. Wait a minute and try again.')),
+    // Booking and upload limits say what the limit is: show HOLA's words.
+    _ when e.status == 429 => DomainError(e.code == 'RATE_LIMITED' && e.detail.isNotEmpty ? e.detail : tr('Too many tries. Wait a minute and try again.')),
     _ when e.status >= 500 => DomainError(tr('HOLA is having a problem right now. Try again soon.')),
     _ => DomainError(e.detail.isEmpty ? tr('Something went wrong. Please try again.') : e.detail),
   };
@@ -274,7 +398,8 @@ DomainError _validation(ApiError e, Map<String, String> names) {
   final field = names[path] ?? path;
   final text = switch (field) {
     'email' => tr('Enter a valid email address.'),
-    'password' => tr('Use at least 8 characters for the password.'),
+    // HOLA's words: too short, or too common (0.26.0); same code and path.
+    'password' => msg.isEmpty ? tr('Use at least 8 characters for the password.') : tr(msg),
     'phone' => tr('Enter a valid phone number.'),
     'name' => tr('Enter your full name.'),
     // Name the field so the message makes sense outside a form.

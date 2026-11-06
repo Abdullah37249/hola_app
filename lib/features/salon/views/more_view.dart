@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'clients_view.dart';
+
 import '../../../core/utils/format.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
 import '../../chat/chat.dart';
 import '../../profile/profile.dart';
 import '../../trade/trade.dart';
+import '../../../domain/entities/entities.dart';
+import '../../../domain/repositories/repositories.dart';
 import '../viewmodels/salon_view_model.dart';
 import '../widgets/salon_widgets.dart';
 import 'engagement_view.dart';
 import 'menu_view.dart';
+import 'offers_admin_view.dart';
 import 'salon_profile_view.dart';
 import 'team_view.dart';
 
@@ -72,23 +77,31 @@ class _OwnerMore extends StatelessWidget {
         _Label(tr('Clients')),
         Group(
           children: [
-            MRow(icon: 'msg', title: tr('Messages'), sub: tr('Chats with your clients'), trailing: countOrChev(context, vm.unreadMessages), onTap: () => pushPage(context, const ChatInboxPage())),
+            MRow(icon: 'users', title: tr('Client history'), sub: tr('Past visits, services and spend of each client'), onTap: () => pushPage(context, const ClientsPage())),
+            MRow(icon: 'msg', title: tr('Messages'), sub: tr('Clients and delivery riders'), trailing: countOrChev(context, vm.unreadMessages), onTap: () => pushPage(context, const MessagesPage())),
             MRow(
               icon: 'star',
               title: tr('Reviews'),
-              sub: r.count == 0 ? tr('No reviews yet') : tr('{rating} from {reviews}', {'rating': r.average.toStringAsFixed(1), 'reviews': plural(r.count, 'review')}),
+              sub: [
+                r.count == 0
+                    ? (vm.waitingReviews == 0 ? tr('No reviews yet') : tr('No published reviews yet'))
+                    : tr('{rating} from {reviews}', {'rating': r.average.toStringAsFixed(1), 'reviews': plural(r.count, 'review')}),
+                if (vm.waitingReviews > 0) tr('{n} waiting for HOLA', {'n': vm.waitingReviews}),
+              ].join(' · '),
               tint: 1,
               trailing: countOrChev(context, vm.unrepliedReviews, warn: true),
               onTap: () => pushPage(context, const ReviewsPage()),
             ),
-            MRow(
-              icon: 'alert',
-              title: tr('Client feedback'),
-              sub: vm.openFeedback == 0 ? tr('Nothing open') : tr('{n} open', {'n': vm.openFeedback}),
-              tint: 1,
-              trailing: countOrChev(context, vm.openFeedback, warn: true),
-              onTap: () => pushPage(context, const FeedbackInboxPage()),
-            ),
+            // Off since HOLA 0.30.0 (complaints removed).
+            if (context.read<EngagementRepository>().complaintsOn)
+              MRow(
+                icon: 'alert',
+                title: tr('Client feedback'),
+                sub: vm.openFeedback == 0 ? tr('Nothing open') : tr('{n} open', {'n': vm.openFeedback}),
+                tint: 1,
+                trailing: countOrChev(context, vm.openFeedback, warn: true),
+                onTap: () => pushPage(context, const FeedbackInboxPage()),
+              ),
           ],
         ),
         const SizedBox(height: 18),
@@ -103,6 +116,12 @@ class _OwnerMore extends StatelessWidget {
               onTap: () => pushTab(context, const SalonTeam()),
             ),
             MRow(icon: 'scissors', title: tr('Service menu'), sub: plural(vm.activeServices.length, 'service'), onTap: () => pushTab(context, const SalonMenu())),
+            MRow(
+              icon: 'sparkle',
+              title: tr('Offers & discounts'),
+              sub: vm.runningOffers == 0 ? tr('Discounts on your services') : tr('{n} running', {'n': vm.runningOffers}),
+              onTap: () => pushPage(context, const SalonOffersPage()),
+            ),
             MRow(icon: 'store', title: tr('Salon profile & branches'), sub: tr('Details, address, opening hours'), onTap: () => pushPage(context, const SalonProfilePage())),
             MRow(
               icon: 'clock',
@@ -134,10 +153,36 @@ class _OwnerMore extends StatelessWidget {
             MRow(
               icon: 'doc',
               title: tr('Credit statement'),
-              sub: s.creditLimit > 0 ? tr('Limit {amount}', {'amount': rs(s.creditLimit)}) : tr('No HOLA credit yet'),
+              sub: s.creditLimit > 0 ? tr('Limit {amount}', {'amount': rsShort(s.creditLimit)}) : tr('No HOLA credit yet'),
               tint: 2,
               onTap: () => pushPage(context, StatementPage(salonId: s.id)),
             ),
+            if (vm.isOwner && context.read<ReturnRepository>().live)
+              Builder(
+                builder: (context) {
+                  final rs = context.read<ReturnRepository>().returns(salonId: s.id);
+                  final answer = rs.where((r) => r.status == ReturnStatus.awaitingSalon).length;
+                  final open = rs.where((r) => r.isOpen).length;
+                  return MRow(
+                    icon: 'again',
+                    title: tr('Returns & refunds'),
+                    sub: answer > 0
+                        ? tr('{n} need your answer', {'n': answer})
+                        : open > 0
+                        ? tr('{n} open', {'n': open})
+                        : tr('Replace or get money back for delivered products'),
+                    trailing: countOrChev(context, answer, warn: true),
+                    onTap: () => pushPage(context, ReturnsPage(salonId: s.id)),
+                  );
+                },
+              ),
+            if (context.read<ChatRepository>().holaChat)
+              MRow(
+                icon: 'msg',
+                title: tr('Message HOLA'),
+                sub: tr('Questions about orders, credit or anything else'),
+                onTap: () => openHolaChat(context, salonId: s.id),
+              ),
           ],
         ),
         const SizedBox(height: 18),

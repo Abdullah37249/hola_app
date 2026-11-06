@@ -9,6 +9,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
 import '../network/api.dart';
+import 'push_events.dart';
+import 'reminders.dart';
 
 // HOLA's server sends to classic FCM registration tokens, so this uses
 // getToken/onTokenRefresh/deleteToken. The newer register()/onRegistered API
@@ -39,15 +41,25 @@ class PushService {
   String? _accountId;
   Future<void>? _registering;
 
+  /// "account|token" registered with HOLA during this run of the app.
+  String? _done;
+
   Future<void> start() async {
     api.beforeLogout = unregister;
     await _fm.setAutoInitEnabled(true);
+    // iPhone hides pushes while the app is open unless told otherwise: show
+    // the banner with sound, as people expect on iOS (Android shows a toast).
+    if (Platform.isIOS) await _fm.setForegroundNotificationPresentationOptions(alert: true, badge: true, sound: true);
     _fm.onTokenRefresh.listen((t) {
       if (auth.current != null) _register(token: t);
     });
     FirebaseMessaging.onMessage.listen((m) {
       final (title, body, link) = _read(m);
-      engage.receivePush(title, body, link: link);
+      if ('${m.data['type']}' == 'appointment_reminder') showReminderPush(m.data);
+      // A booking changed elsewhere: its phone reminders wait for the fresh copy.
+      if ('${m.data['type']}' == 'appointment' && '${m.data['id'] ?? ''}'.isNotEmpty) Reminders.instance.cancelFor('${m.data['id']}');
+      pushEvents.add('${m.data['type'] ?? ''}');
+      engage.receivePush(title, body, link: link, inboxId: m.data['notificationId'] as String?);
       onForeground?.call(title, body, link);
     });
     FirebaseMessaging.onMessageOpenedApp.listen(_tapped);
@@ -59,7 +71,8 @@ class PushService {
 
   void _tapped(RemoteMessage m) {
     final (title, body, link) = _read(m);
-    engage.receivePush(title, body, link: link);
+    pushEvents.add('${m.data['type'] ?? ''}');
+    engage.receivePush(title, body, link: link, inboxId: m.data['notificationId'] as String?);
     final inboxId = m.data['notificationId'];
     if (inboxId != null && '$inboxId'.isNotEmpty) {
       api.post('/me/notifications/$inboxId/read', const {}).catchError((Object e) {
@@ -93,18 +106,31 @@ class PushService {
     try {
       // Android 13+ and iOS ask the user once; a "no" still registers the
       // token, so turning notifications on later in Settings just works.
-      await _fm.requestPermission();
+      final perm = await _fm.requestPermission();
+      debugPrint('Push: permission ${perm.authorizationStatus.name}');
+      // iPhone: Firebase hands out its token only once Apple's push token has
+      // arrived, which can take a few seconds after the first launch.
+      if (token == null && Platform.isIOS) {
+        for (var i = 0; i < 10 && await _fm.getAPNSToken() == null; i++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+        }
+      }
       token ??= await _fm.getToken();
       if (token == null || auth.current == null) return;
       final saved = await _saved();
       final me = auth.current!.id;
-      if (saved != null && saved['token'] == token && saved['account'] == me) return;
+      // Registered already in this run of the app. Otherwise always tell HOLA
+      // again (it's an upsert): the server may have dropped this phone, e.g.
+      // after another account used it, and a stale local record would then
+      // leave the account without pushes.
+      if (_done == '$me|$token') return;
       // A rotated token or another account: drop the old registration first.
-      if (saved?['id'] != null) await _delete(saved!['id']!);
+      if (saved?['id'] != null && (saved!['token'] != token || saved['account'] != me)) await _delete(saved['id']!);
       final r = await api.post('/me/devices', {'platform': Platform.isIOS ? 'ios' : 'android', 'fcmToken': token, 'appVersion': kAppVersion});
       final j = r is Map ? (r['data'] is Map ? r['data'] as Map : r) : const {};
       final id = '${j['id'] ?? ''}';
       await _secure.write(key: _key, value: jsonEncode({'id': id, 'token': token, 'account': me}));
+      _done = '$me|$token';
       debugPrint('Push: registered device $id');
     } catch (e) {
       debugPrint('Push: registration failed: $e ${e is ApiError ? e.fields : ''}');
@@ -115,6 +141,7 @@ class PushService {
   /// phone gets nothing even if the server call fails.
   Future<void> unregister() async {
     _accountId = null;
+    _done = null;
     try {
       final saved = await _saved();
       if (saved?['id'] != null) await _delete(saved!['id']!);
@@ -165,12 +192,44 @@ NotifLink? pushLink(Map<String, dynamic> d) {
     'review' => 'review',
     'payment_request' => 'payment',
     'coupon' => 'offers',
+    'offer' => 'service_offer', // a salon offer is free to use again
+    'credit_collection' => 'collection', // a salon chose this rider to pay
+    'chat_message' => 'chat', // id is the conversation
+    'message' => 'chat', // HOLA ↔ salon chat (0.23.0): conversationId
+    'return' => 'return', // a return request moved on (0.23.0): returnId
+    'return_pickup' => 'return', // a rider was sent to collect returned goods
+    'appointment_reminder' => 'appointment', // a visit tomorrow or in 2 hours
     'certificate' => 'training', // id is the certificate number; open its session
     _ => null,
   };
   if (kind == null) return null;
-  final id = kind == 'training' ? '${d['sessionId'] ?? d['id'] ?? ''}' : '${d['id'] ?? ''}';
+  final id = switch (kind) {
+    'training' => '${d['sessionId'] ?? d['id'] ?? ''}',
+    'chat' => '${d['conversationId'] ?? d['id'] ?? ''}',
+    'return' => '${d['returnId'] ?? d['id'] ?? ''}',
+    _ => '${d['id'] ?? ''}',
+  };
   // Complaints and reviews open their lists; the rest need the entity.
-  if (id.isEmpty && kind != 'complaint' && kind != 'review' && kind != 'offers') return null;
+  if (id.isEmpty && kind != 'complaint' && kind != 'review' && kind != 'offers' && kind != 'service_offer') return null;
   return NotifLink(kind, id);
+}
+
+/// A booking reminder HOLA pushed as data only: drawn by the app so it has
+/// the Directions and Cancel buttons, in place of the phone's own reminder.
+Future<void> showReminderPush(Map<String, dynamic> d) {
+  final id = '${d['id'] ?? ''}';
+  if (id.isEmpty) return Future.value();
+  return Reminders.instance.showPushed(appointmentId: id, kind: '${d['kind'] ?? '2h'}', title: '${d['title'] ?? ''}', body: '${d['body'] ?? ''}', mapsUrl: '${d['mapsUrl'] ?? ''}');
+}
+
+/// Pushes that arrive while the app is closed. Normal pushes are shown by
+/// Android itself; only reminders need the app to draw them.
+@pragma('vm:entry-point')
+Future<void> pushInBackground(RemoteMessage m) async {
+  final type = '${m.data['type']}', id = '${m.data['id'] ?? ''}';
+  if (type == 'appointment_reminder') await showReminderPush(m.data);
+  // The salon cancelled, moved or confirmed a booking while the app was closed:
+  // drop the phone's own reminders for it (HOLA's own reminders still come if
+  // the visit is on). The app schedules them again from fresh data when opened.
+  if (type == 'appointment' && id.isNotEmpty) await Reminders.instance.cancelFor(id);
 }

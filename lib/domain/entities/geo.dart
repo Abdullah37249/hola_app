@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'json.dart';
 
 /// A GPS reading: where something happened, and how sure the phone was.
@@ -13,4 +15,13 @@ class GeoFix {
 
   /// "31.52040, 74.35870 (±12 m)".
   String get label => '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}${accuracy > 0 ? ' (±${accuracy.round()} m)' : ''}';
+}
+
+/// Straight-line distance between two points, in kilometres (haversine).
+double distanceKm(GeoFix a, GeoFix b) {
+  const r = 6371.0;
+  double rad(double d) => d * math.pi / 180;
+  final dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  final h = math.pow(math.sin(dLat / 2), 2) + math.cos(rad(a.lat)) * math.cos(rad(b.lat)) * math.pow(math.sin(dLng / 2), 2);
+  return 2 * r * math.asin(math.sqrt(h));
 }

@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../../core/l10n/l10n.dart';
 import '../../core/security/sha256.dart';
 import '../../core/utils/clock.dart';
+import '../../core/utils/format.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
 import 'local_auth_repository.dart';
@@ -8,6 +10,7 @@ import '../../core/network/api.dart';
 import '../../domain/entities/json.dart' show asInt;
 import 'hola_mirror.dart';
 import 'hola_salon_sync.dart';
+import 'offer_rules.dart';
 import '../../core/utils/photo_files.dart';
 
 class LocalSalonRepository extends LocalRepository implements SalonRepository {
@@ -64,7 +67,8 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
   Salon? salonOfOwner(String accountId) => db.salons.where((s) => s.ownerId == accountId).firstOrNull;
 
   @override
-  List<Branch> branches(String salonId) => db.branches.where((b) => b.salonId == salonId).toList();
+  // '~delivery' is a rider's copy of a delivery address, not a real branch.
+  List<Branch> branches(String salonId) => db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).toList();
 
   @override
   Branch? branch(String id) => db.branches.where((b) => b.id == id).firstOrNull;
@@ -90,7 +94,10 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
 
   @override
   SalonRating rating(String salonId) {
-    final rs = db.reviews.where((r) => r.salonId == salonId).toList();
+    // HOLA salons: HOLA's own figure, from published reviews only.
+    final s = salon(salonId);
+    if (s != null && s.hola && s.ratingCount != null) return SalonRating(s.ratingAverage ?? 0, s.ratingAverage == null ? 0 : s.ratingCount!);
+    final rs = db.reviews.where((r) => r.salonId == salonId && !r.pending && !r.removed).toList();
     if (rs.isEmpty) return const SalonRating(0, 0);
     return SalonRating(rs.fold<int>(0, (s, r) => s + r.stars) / rs.length, rs.length);
   }
@@ -210,7 +217,18 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
     _validateName(name, 'branch name');
     _validateName(address, 'address');
     _validateName(city, 'city');
-    final b = Branch(id: db.newId(), salonId: salonId, name: name.trim(), address: address.trim(), area: area.trim(), city: city.trim());
+    if (branches(salonId).any((b) => b.name.trim().toLowerCase() == name.trim().toLowerCase())) throw DomainError(tr('You already have a branch with this name.'), field: 'name');
+    if (_on(salonId) case final server?) {
+      final b = await _write(() => server.addBranch(salonId, name: name, address: address, area: area, city: city));
+      // The menu items the new branch got, as customers will see them.
+      try {
+        await server.pullSalon(salonId, ownerId: salon(salonId)!.ownerId);
+      } catch (_) {}
+      db.commit();
+      return branch(b.id) ?? b;
+    }
+    final main = branches(salonId).firstOrNull;
+    final b = Branch(id: db.newId(), salonId: salonId, name: name.trim(), address: address.trim(), area: area.trim(), city: city.trim(), hours: main == null ? null : [...main.hours]);
     db.branches.add(b);
     db.commit();
     return b;
@@ -246,15 +264,39 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
     final b = branch(branchId) ?? (throw DomainError(tr('Branch not found.')));
     _ownedSalon(b.salonId);
     if (branches(b.salonId).length == 1) throw DomainError(tr('A salon needs at least one branch.'));
-    if (db.appointments.any((a) => a.branchId == branchId && ApptStatus.holding.contains(a.status))) throw DomainError(tr('This branch has upcoming appointments.'));
+    if (db.appointments.any((a) => a.branchId == branchId && ApptStatus.holding.contains(a.status))) {
+      throw DomainError(tr('This branch has upcoming appointments. Move or cancel them first.'));
+    }
+    if (_on(b.salonId) != null) {
+      try {
+        await api!.delete('/salons/${b.salonId}/branches/$branchId');
+      } on ApiError catch (e) {
+        if (e.status == 409) throw DomainError(tr('HOLA can’t delete this branch: {why}', {'why': e.detail}));
+        throw apiToDomain(e);
+      }
+    }
+    // Team members who worked there move to the first remaining branch.
+    for (final p in db.staff.where((p) => p.branchId == branchId)) {
+      p.branchId = null;
+    }
     db.branches.remove(b);
+    if (_on(b.salonId) case final server?) {
+      try {
+        await server.pullSalon(b.salonId, ownerId: salon(b.salonId)!.ownerId);
+        await server.pullTeam(b.salonId);
+      } catch (_) {}
+    }
     db.commit();
   }
 
   @override
   Future<void> updatePolicy(String salonId, {required bool autoConfirm, required int cancelWindowHours, required int noShowGraceMin}) async {
     final s = _ownedSalon(salonId);
-    if (_on(salonId) case final server?) await _write(() => server.updateProfile(salonId, autoConfirm: autoConfirm));
+    if (_on(salonId) case final server?) {
+      await _write(() => server.updatePolicy(salonId, autoConfirm: autoConfirm, cancelWindowHours: cancelWindowHours.clamp(0, 72), noShowGraceMin: noShowGraceMin.clamp(5, 60)));
+      db.commit();
+      return;
+    }
     s
       ..autoConfirm = autoConfirm
       ..cancelWindowHours = cancelWindowHours.clamp(0, 72)
@@ -330,6 +372,192 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
     db.commit();
   }
 
+  // ── offers & discounts ──
+
+  /// HOLA salons keep offers on the server (contract 0.20.0); the server
+  /// applies them to bookings itself.
+  static bool offersLive = true;
+
+  @override
+  List<ServiceOffer> offers(String salonId) => db.offers.where((o) => o.salonId == salonId).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  @override
+  List<ServiceOffer> liveOffers({String? salonId}) {
+    final t = now();
+    final visible = {for (final s in discover()) s.id};
+    return db.offers.where((o) {
+      if (salonId != null && o.salonId != salonId) return false;
+      if (!visible.contains(o.salonId) || !o.liveAt(t)) return false;
+      // An offer this customer has spent is gone for them (a cancelled booking frees it).
+      if (offerUse(o) == OfferUse.used) return false;
+      return service(o.serviceId)?.active == true;
+    }).toList()..sort((a, b) => a.endsAt.compareTo(b.endsAt));
+  }
+
+  @override
+  String offerUse(ServiceOffer o) => offerUseOf(db, me?.id, o);
+
+  @override
+  String heldOn(ServiceOffer o) => heldOnOf(db, me?.id, o);
+
+  @override
+  ({int used, int held}) offerStats(ServiceOffer o) {
+    if (o.hola) return (used: o.usedCount, held: o.reservedCount);
+    final xs = db.appointments.where((a) => a.offerIds.contains(o.id));
+    return (used: xs.where((a) => offerSpent.contains(a.status)).length, held: xs.where((a) => ApptStatus.holding.contains(a.status)).length);
+  }
+
+  @override
+  ServiceOffer? offerFor(String serviceId) {
+    final svc = service(serviceId);
+    if (svc == null || !discover().any((s) => s.id == svc.salonId)) return null;
+    return bestOfferOn(db, me?.id, svc);
+  }
+
+  @override
+  Future<ServiceOffer> saveOffer({
+    String? id,
+    required String salonId,
+    required String serviceId,
+    required String discountType,
+    required int discountValue,
+    required DateTime startDay,
+    required DateTime lastDay,
+    required bool active,
+  }) async {
+    _ownedSalon(salonId);
+    final svc = service(serviceId);
+    if (svc == null || svc.salonId != salonId) throw DomainError(tr('Pick a service.'));
+    if (discountType == DiscountType.percent) {
+      if (discountValue < 1 || discountValue > 90) throw DomainError(tr('Enter a discount between 1% and 90%.'), field: 'value');
+    } else if (discountValue < 1 || discountValue > maxOfferAmount(svc.price)) {
+      // Like a percent offer, at most 90% of the price (HOLA's rule too).
+      throw DomainError(tr('Enter a discount between Rs 1 and {max} (90% of {price}).', {'max': rs(maxOfferAmount(svc.price)), 'price': rs(svc.price)}), field: 'value');
+    }
+    final from = dateOnly(startDay), until = addDays(dateOnly(lastDay), 1);
+    if (until.isBefore(from)) throw DomainError(tr('The last day can’t be before the first day.'));
+    if (!until.isAfter(today)) throw DomainError(tr('The last day can’t be in the past.'));
+    final existing = id == null ? null : db.offers.where((o) => o.id == id).firstOrNull;
+    // One offer at a time per service, so the price clients see is never in doubt.
+    final clash = db.offers.where((o) => o.id != id && o.serviceId == serviceId && o.active && from.isBefore(o.endsAt) && o.startsAt.isBefore(until)).firstOrNull;
+    if (active && clash != null) {
+      throw DomainError(
+        tr('{service} already has an offer from {from} to {to}. Change or switch off that one first.', {'service': svc.name, 'from': dLabel(clash.startsAt), 'to': dLabel(clash.lastDay)}),
+      );
+    }
+    if (salon(salonId)!.hola) {
+      if (!offersLive || api == null) throw DomainError(tr('Offers for your salon will be available once HOLA switches them on.'));
+      final body = {
+        'branchServiceId': serviceId, // a HOLA salon's service is its branch menu item
+        'discountType': discountType,
+        'discountValue': '$discountValue',
+        'startsAt': from.toUtc().toIso8601String(),
+        'endsAt': until.toUtc().toIso8601String(),
+        'active': active,
+        if (existing != null) 'version': existing.version,
+      };
+      final j = await _write(() => existing == null ? api!.post('/salons/$salonId/offers', body) : api!.patch('/salons/$salonId/offers/${existing.id}', body)) as J;
+      final o = mirrorOffer(db, j);
+      db.commit();
+      return o;
+    }
+    if (existing != null) {
+      existing
+        ..serviceId = serviceId
+        ..discountType = discountType
+        ..discountValue = discountValue
+        ..startsAt = from
+        ..endsAt = until
+        ..active = active;
+      db.commit();
+      return existing;
+    }
+    final o = ServiceOffer(
+      id: db.newId(),
+      salonId: salonId,
+      serviceId: serviceId,
+      discountType: discountType,
+      discountValue: discountValue,
+      startsAt: from,
+      endsAt: until,
+      active: active,
+      createdAt: now(),
+    );
+    db.offers.add(o);
+    db.commit();
+    return o;
+  }
+
+  ServiceOffer _ownedOffer(String id) {
+    final o = db.offers.where((x) => x.id == id).firstOrNull ?? (throw DomainError(tr('Offer not found.')));
+    _ownedSalon(o.salonId);
+    return o;
+  }
+
+  @override
+  Future<void> setOfferActive(String id, bool active) async {
+    final o = _ownedOffer(id);
+    if (active) {
+      // Re-check the rules (dates, one offer per service) before it goes live again.
+      await saveOffer(id: o.id, salonId: o.salonId, serviceId: o.serviceId, discountType: o.discountType, discountValue: o.discountValue, startDay: o.startsAt, lastDay: o.lastDay, active: true);
+      return;
+    }
+    if (o.hola) {
+      final j = await _write(() => api!.patch('/salons/${o.salonId}/offers/${o.id}', {'active': false, 'version': o.version})) as J;
+      mirrorOffer(db, j);
+    } else {
+      o.active = false;
+    }
+    db.commit();
+  }
+
+  @override
+  Future<void> deleteOffer(String id) async {
+    final o = _ownedOffer(id);
+    // Bookings already made keep the price they were given.
+    if (o.hola) await _write(() => api!.delete('/salons/${o.salonId}/offers/${o.id}'));
+    db.offers.remove(o);
+    db.commit();
+  }
+
+  Future<void>? _offerSync;
+
+  @override
+  Future<void> syncOffers({String? salonId}) {
+    if (!offersLive || api == null) return Future.value();
+    return _offerSync ??= _pullOffers(salonId).whenComplete(() => _offerSync = null);
+  }
+
+  Future<void> _pullOffers(String? salonId) async {
+    try {
+      final seen = <String>{};
+      if (salonId != null) {
+        for (var page = 1, pages = 1; page <= pages; page++) {
+          final res = await api!.get('/salons/$salonId/offers', query: {'page': '$page', 'pageSize': '100'}) as J;
+          pages = asInt((res['meta'] as Map?)?['totalPages'], 1);
+          for (final j in (res['data'] as List).cast<J>()) {
+            seen.add(mirrorOffer(db, j).id);
+          }
+        }
+        db.offers.removeWhere((o) => o.hola && o.salonId == salonId && !seen.contains(o.id));
+      } else {
+        // With the customer's token, each offer says whether they used or hold it.
+        for (var page = 1, pages = 1; page <= pages; page++) {
+          final res = await api!.get('/discover/offers', query: {'page': '$page', 'pageSize': '100'}, auth: me != null) as J;
+          pages = asInt((res['meta'] as Map?)?['totalPages'], 1);
+          for (final j in (res['data'] as List).cast<J>()) {
+            seen.add(mirrorOffer(db, j).id);
+          }
+        }
+        // Offers no longer running leave the customer's view (the salon's own stay).
+        db.offers.removeWhere((o) => o.hola && o.salonId != me?.salonId && !seen.contains(o.id));
+      }
+    } catch (e) {
+      debugPrint('Offers: sync failed: $e'); // offline: keep the last copy
+    }
+    db.commit();
+  }
+
   // ── team ──
 
   @override
@@ -368,16 +596,19 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
   }
 
   @override
-  Future<void> updateStaff(String accountId, {required String title, required bool bookable, required List<Shift?> week}) async {
+  Future<void> updateStaff(String accountId, {required String title, required bool bookable, required List<Shift?> week, String? branchId}) async {
     final p = staffProfile(accountId) ?? (throw DomainError(tr('Team member not found.')));
     _ownedSalon(p.salonId);
     for (final h in week) {
       if (h != null && h.end <= h.start) throw DomainError(tr('Shift end must be after its start.'));
     }
-    if (_on(p.salonId) case final server?) await _write(() => server.pushMember(p.salonId, accountId, title: title, bookable: bookable, week: week));
+    final at = branchId ?? p.branchId;
+    if (at != null && branch(at)?.salonId != p.salonId) throw DomainError(tr('Pick one of your branches.'));
+    if (_on(p.salonId) case final server?) await _write(() => server.pushMember(p.salonId, accountId, title: title, bookable: bookable, week: week, atBranch: at));
     p
       ..title = title.trim()
-      ..bookable = bookable;
+      ..bookable = bookable
+      ..branchId = at;
     p.week.setAll(0, week);
     db.commit();
   }
@@ -404,6 +635,12 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
     if (t.isBefore(f)) throw DomainError(tr('The last day must be on or after the first day.'));
     if (f.isBefore(today)) throw DomainError(tr("Leave can't start in the past."));
     if (reason.trim().length < 3) throw DomainError(tr('Add a short reason.'));
+    // HOLA salons: recorded on HOLA, so clients can't book them those days.
+    if (_on(p.salonId) case final server?) {
+      final l = await _write(() => server.addLeave(p.salonId, memberId: staffId, from: f, to: t, reason: reason));
+      db.commit();
+      return l;
+    }
     final l = LeaveRequest(id: db.newId(), salonId: p.salonId, staffId: staffId, from: f, to: t, reason: reason.trim(), status: 'APPROVED', createdAt: now());
     db.leave.add(l);
     db.commit();
@@ -415,6 +652,11 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
     final l = db.leave.where((x) => x.id == leaveId).firstOrNull ?? (throw DomainError(tr('Request not found.')));
     _ownedSalon(l.salonId);
     if (l.status != 'PENDING') throw DomainError(tr('This request was already answered.'));
+    if (_on(l.salonId) case final server?) {
+      await _write(() => server.leaveAction(l.salonId, l.id, approve ? 'approve' : 'decline'));
+      db.commit();
+      return;
+    }
     l.status = approve ? 'APPROVED' : 'DECLINED';
     db.commit();
   }
@@ -423,6 +665,11 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
   Future<void> cancelLeave(String leaveId) async {
     final l = db.leave.where((x) => x.id == leaveId).firstOrNull ?? (throw DomainError(tr('Request not found.')));
     _ownedSalon(l.salonId);
+    if (_on(l.salonId) case final server?) {
+      await _write(() => server.leaveAction(l.salonId, l.id, 'cancel'));
+      db.commit();
+      return;
+    }
     l.status = 'CANCELLED';
     db.commit();
   }
@@ -454,6 +701,22 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
       // Offline or server trouble: keep what we had; the offline banner explains.
       db.commit();
     }
+    await syncOffers();
+  }
+
+  @override
+  Future<void> syncMySalon(String salonId) async {
+    final server = _on(salonId);
+    if (server == null) return;
+    try {
+      await server.pullSalon(salonId, ownerId: salon(salonId)!.ownerId);
+      await server.pullPolicy(salonId);
+      if (me?.role == Role.salonOwner) await server.pullLeave(salonId);
+      await syncOffers(salonId: salonId);
+    } catch (e) {
+      debugPrint('Salon: sync failed: $e'); // offline: keep the last copy
+    }
+    db.commit();
   }
 
   // ── customers ──

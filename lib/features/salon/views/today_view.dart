@@ -36,7 +36,11 @@ class _OwnerToday extends StatelessWidget {
     final next = vm.upNext();
     return BandView(
       role: 'salon',
-      onRefresh: context.read<BookingRepository>().sync,
+      // Pull to refresh: the bookings, and HOLA's offers and products below them.
+      onRefresh: () {
+        final trade = context.read<TradeRepository>();
+        return Future.wait([context.read<BookingRepository>().sync(), trade.syncCoupons(s.id).catchError((Object _) {}), trade.syncCatalogue().catchError((Object _) {})]);
+      },
       children: [
         ...staggered([
           TopHead(eyebrow: '${s.name} · ${dLabel(today)}', title: '${greeting(now())}, ${vm.me?.firstName ?? ''}', oneLine: true, actions: const [NotificationBell()]),
@@ -47,7 +51,11 @@ class _OwnerToday extends StatelessWidget {
           match: true, // every header ends at the same height (kTodayBand)
           child: Reveal(
             i: 1,
-            child: KpiRow([Kpi(tr('Bookings today'), vm.countOn(today), hl: true), Kpi(tr('Expected today'), vm.revenueOn(today), format: (v) => rs(v)), Kpi(tr('Waiting for answer'), reqs.length)]),
+            child: KpiRow([
+              Kpi(tr('Bookings today'), vm.countOn(today), hl: true),
+              Kpi(tr('Expected today'), vm.revenueOn(today), format: (v) => rsShort(v)),
+              Kpi(tr('Waiting for answer'), reqs.length),
+            ]),
           ),
         ),
         ...staggered([
@@ -175,20 +183,38 @@ class _TodayProducts extends StatelessWidget {
                 onAction: () => pushPage(context, OffersPage(salonId: salonId)),
               ),
               const SizedBox(height: 12),
-              PromoCard(
-                vm.offers.first,
-                onUse: canOrder ? () => pushPage(context, NewOrderPage(salonId: salonId, coupon: vm.offers.first.code)) : null,
-              ),
-              if (vm.offers.length > 1) ...[
-                const SizedBox(height: 8),
-                Tap(
-                  onTap: () => pushPage(context, OffersPage(salonId: salonId)),
-                  child: Text(
-                    tr('+{n} more offers', {'n': vm.offers.length - 1}),
-                    style: T.sm(context).copyWith(color: c.brandText, fontWeight: FontWeight.w600),
+              // One offer fills the row; two or more slide sideways, with the
+              // next card peeking in so it's clear there are more.
+              if (vm.offers.length == 1)
+                PromoCard(
+                  vm.offers.first,
+                  onUse: canOrder ? () => pushPage(context, NewOrderPage(salonId: salonId, coupon: vm.offers.first.code)) : null,
+                )
+              else
+                LayoutBuilder(
+                  builder: (context, box) => SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.none,
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final (i, o) in vm.offers.indexed)
+                            Padding(
+                              padding: EdgeInsetsDirectional.only(end: i == vm.offers.length - 1 ? 0 : 12),
+                              child: SizedBox(
+                                width: box.maxWidth * .88,
+                                child: PromoCard(
+                                  o,
+                                  onUse: canOrder ? () => pushPage(context, NewOrderPage(salonId: salonId, coupon: o.code)) : null,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ],
               const SizedBox(height: 24),
             ],
             SecHead(tr('HOLA products'), action: list.isEmpty ? null : tr('See all'), onAction: () => context.read<SessionViewModel>().setTab('products')),
@@ -259,7 +285,7 @@ class _ProductMini extends StatelessWidget {
             Text(p.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.ttl(context).copyWith(fontSize: 14)),
             Text(tr(p.category), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.cap(context)),
             const SizedBox(height: 6),
-            if (v != null) Text(rs(v.tradePrice), style: T.ttl(context).copyWith(color: context.c.brandText)),
+            if (v != null) Text(rsShort(v.tradePrice), style: T.ttl(context).copyWith(color: context.c.brandText)),
             if (p.hasScheme) ...[const SizedBox(height: 6), SchemeBadge(p.schemeLabel)],
           ],
         ),

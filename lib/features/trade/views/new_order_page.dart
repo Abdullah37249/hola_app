@@ -133,6 +133,17 @@ class ProductOrderCard extends StatelessWidget {
                   Text(p.name, style: T.ttl(context)),
                   // Size (one variant) and type on one line, as on HOLA's cards.
                   Text(p.variants.length > 1 ? tr(p.category) : '${v.name} · ${tr(p.category)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sub(context)),
+                  if (vm.rating(p) case (final avg, final n) when n > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          Stars(avg.round(), size: 12),
+                          const SizedBox(width: 6),
+                          Text('${avg.toStringAsFixed(1)} · ${plural(n, 'salon review')}', style: T.cap(context)),
+                        ],
+                      ),
+                    ),
                 ],
               ),
               if (p.variants.length > 1) _variants(p, v, vm),
@@ -206,6 +217,72 @@ Future<void> showProductDetail(BuildContext context, Product p) {
   return showHSheet(context, (_) => ChangeNotifierProvider.value(value: vm, child: _ProductDetail(p)));
 }
 
+/// The product's photos, swiped sideways, with dots when there are several.
+class _Photos extends StatefulWidget {
+  const _Photos(this.p);
+  final Product p;
+  @override
+  State<_Photos> createState() => _PhotosState();
+}
+
+class _PhotosState extends State<_Photos> {
+  var _at = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final p = widget.p;
+    final photos = p.photos;
+    Widget bottle() => Bottle(color: p.color, shape: p.shape, height: 180, scale: 1.4);
+    return Column(
+      children: [
+        Container(
+          height: 230,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: c.line),
+          ),
+          alignment: Alignment.center,
+          child: photos.isEmpty
+              ? bottle()
+              : PageView(
+                  onPageChanged: (i) => setState(() => _at = i),
+                  children: [
+                    for (final u in photos)
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Image.network(
+                          u,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => Center(child: bottle()),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+        if (photos.length > 1) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < photos.length; i++)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: i == _at ? 16 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(color: i == _at ? c.brandText : c.line, borderRadius: BorderRadius.circular(3)),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _ProductDetail extends StatelessWidget {
   const _ProductDetail(this.p);
   final Product p;
@@ -220,33 +297,22 @@ class _ProductDetail extends StatelessWidget {
     final out = v.stock <= 0;
     final margin = v.retailPrice - v.tradePrice;
     return VStack(gap: 16, [
-      // Big photo on white, like HOLA's shop.
-      Container(
-        height: 230,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: c.line),
-        ),
-        alignment: Alignment.center,
-        child: p.imageUrl.startsWith('https://')
-            ? Padding(
-                padding: const EdgeInsets.all(12),
-                child: Image.network(
-                  p.imageUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => Bottle(color: p.color, shape: p.shape, height: 180, scale: 1.4),
-                ),
-              )
-            : Bottle(color: p.color, shape: p.shape, height: 180, scale: 1.4),
-      ),
+      // Big photos on white, like HOLA's shop: swipe through all of them.
+      _Photos(p),
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(p.name, style: T.h2(context)),
           const SizedBox(height: 2),
-          Text(p.variants.length > 1 ? tr(p.category) : '${v.name} · ${tr(p.category)}', style: T.sub(context)),
+          Text([if (p.brand.isNotEmpty) p.brand, if (p.variants.length == 1) v.name, tr(p.category)].join(' · '), style: T.sub(context)),
+          if (v.size.isNotEmpty || v.sku.isNotEmpty)
+            Text(
+              [
+                if (v.size.isNotEmpty && v.size != v.name) tr('Size {size}', {'size': v.size}),
+                if (v.sku.isNotEmpty) tr('SKU {sku}', {'sku': v.sku}),
+              ].join(' · '),
+              style: T.cap(context),
+            ),
         ],
       ),
       // Price: trade, retail, and what the salon makes reselling it.
@@ -710,6 +776,10 @@ class _CouponBoxState extends State<_CouponBox> {
       FocusScope.of(context).unfocus();
       vm.applyCoupon(code.text);
     }
+
+    // A code applied from an offer card shows in the box, so an error
+    // ("spend at least …") says which coupon it's about.
+    if (code.text.isEmpty && vm.triedCode.isNotEmpty && vm.couponError != null) code.text = vm.triedCode;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

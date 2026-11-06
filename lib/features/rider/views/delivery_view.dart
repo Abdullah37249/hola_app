@@ -11,6 +11,7 @@ import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
+import '../../chat/chat.dart';
 import '../viewmodels/deliveries_view_model.dart';
 import '../viewmodels/delivery_view_model.dart';
 import '../widgets/signature_pad.dart';
@@ -135,6 +136,16 @@ class _Delivery extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 14),
+        if (context.read<ChatRepository>().live) ...[
+          HButton(
+            tr('Message salon'),
+            icon: 'msg',
+            kind: BtnKind.secondary,
+            block: true,
+            onTap: () => openChat(context, salonId: stop.salon.id, orderId: o.id),
+          ),
+          const SizedBox(height: 14),
+        ],
         Group(
           children: [
             if (ownerName.isNotEmpty || ownerPhone.isNotEmpty)

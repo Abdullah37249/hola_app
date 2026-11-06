@@ -97,7 +97,7 @@ class _CreditBody extends StatelessWidget {
                     alignment: Alignment.centerLeft,
                     child: CountUp(
                       cr.available,
-                      format: rs,
+                      format: rsShort,
                       style: T.h1(context).copyWith(color: Colors.white),
                     ),
                   ),
@@ -108,7 +108,7 @@ class _CreditBody extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(color: warn ? const Color(0xFFD9534F) : Colors.white.withValues(alpha: .12), borderRadius: BorderRadius.circular(999)),
               child: Text(
-                warn ? tr('{amount} overdue', {'amount': rs(cr.overdue)}) : tr('Nothing overdue'),
+                warn ? tr('{amount} overdue', {'amount': rsShort(cr.overdue)}) : tr('Nothing overdue'),
                 style: const TextStyle(fontFamily: T.f, fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
               ),
             ),
@@ -151,7 +151,7 @@ class _CreditBody extends StatelessWidget {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
-                    child: Text(rs(cr.outstanding), style: val),
+                    child: Text(rsShort(cr.outstanding), style: val),
                   ),
                 ],
               ),
@@ -169,7 +169,7 @@ class _CreditBody extends StatelessWidget {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
-                    child: Text(rs(cr.limit), style: val),
+                    child: Text(rsShort(cr.limit), style: val),
                   ),
                 ],
               ),
@@ -188,7 +188,7 @@ class _CreditBody extends StatelessWidget {
                         ? Text.rich(
                             TextSpan(
                               children: [
-                                TextSpan(text: rs(cr.lastPayment), style: val),
+                                TextSpan(text: rsShort(cr.lastPayment), style: val),
                                 if (cr.lastPaymentAt != null) TextSpan(text: ' ${cr.lastPaymentAt!.day} ${months[cr.lastPaymentAt!.month - 1]}', style: small),
                               ],
                             ),
@@ -279,7 +279,7 @@ class OrderCard extends StatelessWidget {
           ],
         ),
         Text(
-          '${plural(o.units, 'item')} · ${rs(o.total)} · ${o.isCod ? tr('Cash on delivery') : tr('Credit')} · ${o.createdAt.day} ${months[o.createdAt.month - 1]}',
+          '${plural(o.units, 'unit')} · ${rsShort(o.total)} · ${o.isCod ? tr('Cash on delivery') : tr('Credit')} · ${o.createdAt.day} ${months[o.createdAt.month - 1]}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: T.sm(context).copyWith(color: c.muted),

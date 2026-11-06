@@ -110,7 +110,7 @@ class _Body extends StatelessWidget {
                         style: T.h3(context),
                       ),
                       const SizedBox(height: 8),
-                      _Line(tr('Booked today'), rs(vm.bookedToday)),
+                      _Line(tr('Booked today'), rsShort(vm.bookedToday)),
                       const SizedBox(height: 4),
                       _Line(tr('Daily report'), vm.reportDone ? tr('Submitted') : tr('Not yet'), color: vm.reportDone ? c.ok : null),
                     ],

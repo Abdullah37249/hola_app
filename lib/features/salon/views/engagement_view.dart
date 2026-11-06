@@ -8,6 +8,7 @@ import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
 import '../viewmodels/salon_view_model.dart';
 import '../widgets/salon_widgets.dart';
+import '../../customer/widgets/review_photos.dart' show ReviewPhotoStrip;
 import 'appointment_view.dart';
 
 /// What clients said after their visits; the salon can reply publicly.
@@ -71,11 +72,36 @@ class ReviewsPage extends StatelessWidget {
                               ),
                             ),
                             Stars(x.stars),
+                            if (vm.canDeleteReviews) ...[
+                              const SizedBox(width: 4),
+                              IconBtn(
+                                'x',
+                                onTap: () async {
+                                  final ok = await confirmSheet(
+                                    context,
+                                    title: tr('Delete this review?'),
+                                    body: tr('It is removed from your profile and your rating, with its photos. This can\'t be undone.'),
+                                    confirm: tr('Delete review'),
+                                    danger: true,
+                                  );
+                                  if (ok) await attempt(() => vm.deleteReview(x.id), success: tr('Review deleted'), icon: 'x');
+                                },
+                              ),
+                            ],
                           ],
                         ),
+                        if (x.pending) ...[
+                          const SizedBox(height: 10),
+                          ToneBadge(tr('Waiting for HOLA'), tone: 'warn'),
+                          const SizedBox(height: 4),
+                          Text(tr('HOLA checks each review before clients see it. It counts in your rating once published.'), style: T.cap(context)),
+                        ],
                         if (x.text.isNotEmpty) ...[const SizedBox(height: 10), Text(x.text, style: T.body(context))],
+                        if (x.photos.isNotEmpty) ...[const SizedBox(height: 10), ReviewPhotoStrip(x)],
                         const SizedBox(height: 10),
-                        if (x.reply != null)
+                        if (x.pending)
+                          const SizedBox.shrink()
+                        else if (x.reply != null)
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
@@ -211,17 +237,17 @@ class _FeedbackState extends State<_Feedback> {
                       )
                     else
                       HButton(
-                        tr('Respond & resolve'),
+                        tr('Respond'),
                         icon: 'check',
                         small: true,
                         onTap: () async {
                           final t = await askText(
                             context,
                             title: tr('Respond to {name}', {'name': x.customerName.split(' ').first}),
-                            body: tr('They are notified and the feedback is marked resolved.'),
+                            body: tr('They are notified of your response.'),
                             label: tr('Response'),
                             hint: tr('We’re sorry about…'),
-                            confirm: tr('Send & resolve'),
+                            confirm: tr('Send response'),
                             minLength: 5,
                           );
                           if (t != null) await attempt(() => vm.resolve(x.id, t), success: tr('Response sent'));

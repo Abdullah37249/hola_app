@@ -8,7 +8,7 @@ import '../../core/utils/clock.dart';
 import '../../core/utils/format.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
-import 'hola_mirror.dart' show branchGeo, money;
+import 'hola_mirror.dart' show branchGeo, money, mirrorPerson;
 import 'local_auth_repository.dart';
 
 class LocalTradeRepository extends LocalRepository implements TradeRepository {
@@ -46,6 +46,8 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       for (final (i, j) in items.indexed) {
         final p = mirrorProduct(j, i);
         seen.add(p.id);
+        // Salons' ratings of the product (contract 0.24.0).
+        if (j['rating'] case final Map r when asIntOr(r['count']) > 0) _ratings[p.id] = (double.tryParse('${r['average']}') ?? 0, asIntOr(r['count']));
         final at = db.products.indexWhere((x) => x.id == p.id);
         at < 0 ? db.products.add(p) : db.products[at] = p;
       }
@@ -158,6 +160,10 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     final lines = quote(cart);
     if (lines.isEmpty) throw DomainError(tr('Your cart is empty.'));
     if (api == null || !lines.every((l) => product(l.productId)?.hola ?? false)) throw DomainError(tr('Coupons work on HOLA products only.'), field: 'couponCode');
+    // HOLA's list already says this salon used it, or it's held by an order.
+    final mine = coupons(salonId).where((c) => c.code.toUpperCase() == code).firstOrNull;
+    if (mine != null && mine.used) throw DomainError(tr('You have already used this coupon.'), field: 'couponCode');
+    if (mine != null && mine.reserved) throw _reserved(mine.reservedOnOrder);
     try {
       final j =
           await api!.post('/salons/$salonId/orders/quote', {
@@ -185,8 +191,172 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
   }
 
   /// HOLA's coupon refusal (not valid, not running, used up…) under the field.
-  DomainError _couponError(ApiError e) =>
-      e.code == 'COUPON_INVALID' ? DomainError(e.fields.values.firstOrNull ?? (e.detail.isEmpty ? tr('This coupon can’t be used.') : e.detail), field: 'couponCode') : apiToDomain(e);
+  DomainError _couponError(ApiError e) {
+    final why = e.fields.values.firstOrNull ?? e.detail;
+    if (e.code == 'COUPON_ALREADY_USED' || (e.code == 'COUPON_INVALID' && why.toLowerCase().contains('already used'))) {
+      return DomainError(tr('You have already used this coupon.'), field: 'couponCode');
+    }
+    if (e.code == 'COUPON_RESERVED') return _reserved(RegExp(r'HO-\d+').firstMatch(why)?.group(0) ?? '');
+    return e.code == 'COUPON_INVALID' ? DomainError(why.isEmpty ? tr('This coupon can’t be used.') : why, field: 'couponCode') : apiToDomain(e);
+  }
+
+  DomainError _reserved(String order) => DomainError(
+    order.isEmpty
+        ? tr('This coupon is on an order that hasn’t been delivered yet. If that order is cancelled, you can use it again.')
+        : tr('This coupon is on order {code}, which hasn’t been delivered yet. If that order is cancelled, you can use it again.', {'code': order}),
+    field: 'couponCode',
+  );
+
+  // ── HOLA product reviews (contract 0.24.0) ──
+
+  /// HOLA's product reviews API is live.
+  static bool productReviewsOn0240 = true;
+
+  @override
+  bool get productReviewsLive => api == null || productReviewsOn0240;
+
+  /// HOLA's own figure per product, from the catalogue.
+  final _ratings = <String, (double, int)>{};
+
+  @override
+  Map<String, ProductReview> productReviewsOn(String orderId) => {
+    for (final r in db.productReviews)
+      if (r.orderId == orderId) r.variantId: r,
+  };
+
+  @override
+  bool canRateProducts(TradeOrder o) {
+    if (!productReviewsLive || me?.role != Role.salonOwner || me?.salonId != o.salonId) return false;
+    if (o.status != OrderStatus.delivered && o.status != OrderStatus.confirmed) return false;
+    final done = productReviewsOn(o.id);
+    return o.lines.any((l) => !done.containsKey(l.variantId));
+  }
+
+  @override
+  (double, int) productRating(String productId) {
+    if (_ratings[productId] case final r?) return r;
+    final rs = db.productReviews.where((r) => r.productId == productId).toList();
+    if (rs.isEmpty) return (0, 0);
+    return (rs.fold(0, (s, r) => s + r.rating) / rs.length, rs.length);
+  }
+
+  @override
+  Future<void> rateProducts(String orderId, Map<String, (int, String)> ratings) async {
+    requireRole({Role.salonOwner});
+    final o = order(orderId) ?? (throw DomainError(tr('Order not found.')));
+    if (requireMe.salonId != o.salonId) throw DomainError(tr('Not your salon.'));
+    if (o.status != OrderStatus.delivered && o.status != OrderStatus.confirmed) throw DomainError(tr('You can rate products once the order is delivered.'));
+    final done = productReviewsOn(o.id);
+    final picked = {
+      for (final e in ratings.entries)
+        if (e.value.$1 > 0 && !done.containsKey(e.key)) e.key: e.value,
+    };
+    if (picked.isEmpty) throw DomainError(tr('Give at least one product a star rating.'));
+    for (final e in picked.entries) {
+      if (e.value.$1 < 1 || e.value.$1 > 5) throw DomainError(tr('Ratings are 1 to 5 stars.'));
+      if (!o.lines.any((l) => l.variantId == e.key)) throw DomainError(tr('That product is not on this order.'));
+    }
+    if (_onServer(o)) {
+      if (!productReviewsOn0240) throw DomainError(tr('Product reviews open once HOLA switches them on.'));
+      final lines = {for (final l in o.lines) l.variantId: l};
+      if (picked.keys.any((v) => (lines[v]?.itemId ?? '').isEmpty)) throw DomainError(tr('Refresh your orders and try again.'));
+      try {
+        final res = await api!.post(
+          '/orders/${o.id}/product-reviews',
+          {
+            'items': [
+              for (final e in picked.entries) {'orderItemId': lines[e.key]!.itemId, 'rating': e.value.$1, if (e.value.$2.trim().isNotEmpty) 'comment': e.value.$2.trim()},
+            ],
+          },
+          headers: {'Idempotency-Key': db.newId() + db.newId()},
+        );
+        final list = res is Map ? (res['data'] ?? res['items'] ?? const []) : res;
+        for (final j in (list as List).cast<Map>()) {
+          _keepProductReview(j, o);
+        }
+        if (list.isEmpty) await syncProductReviews(o.salonId);
+        db.commit();
+        return;
+      } on ApiError catch (e) {
+        if (e.status == 409) throw DomainError(tr('You already rated these products.'));
+        throw apiToDomain(e);
+      }
+    }
+    for (final e in picked.entries) {
+      final l = o.lines.firstWhere((l) => l.variantId == e.key);
+      db.productReviews.add(
+        ProductReview(
+          id: db.newId(),
+          salonId: o.salonId,
+          orderId: o.id,
+          orderCode: o.code,
+          productId: l.productId,
+          variantId: l.variantId,
+          name: l.name,
+          rating: e.value.$1,
+          comment: e.value.$2.trim(),
+          createdAt: now(),
+        ),
+      );
+    }
+    db.notifyRole(Role.salesOfficer, 'New product review', '{salon} · {code}', args: {'salon': _salon(o.salonId).name, 'code': o.code}, icon: 'star', link: _link(o));
+    db.commit();
+  }
+
+  /// One ProductReviewView from HOLA.
+  ProductReview _keepProductReview(Map j, TradeOrder? o) {
+    Map p(Object? v) => v is Map ? v : const {};
+    final itemId = '${j['orderItemId'] ?? p(j['orderItem'])['id'] ?? ''}';
+    final line = o?.lines.where((l) => l.itemId == itemId && itemId.isNotEmpty).firstOrNull;
+    final r = ProductReview(
+      id: '${j['id']}',
+      salonId: '${p(j['salon'])['id'] ?? j['salonId'] ?? o?.salonId ?? ''}',
+      orderId: '${p(j['order'])['id'] ?? j['orderId'] ?? o?.id ?? ''}',
+      orderCode: '${p(j['order'])['code'] ?? o?.code ?? ''}',
+      productId: '${p(j['product'])['id'] ?? j['productId'] ?? line?.productId ?? ''}',
+      variantId: '${p(j['variant'])['id'] ?? j['variantId'] ?? line?.variantId ?? ''}',
+      name: [p(j['product'])['name'] ?? j['product'], p(j['variant'])['name'] ?? j['variant']].where((v) => v is String && v.isNotEmpty).join(' · '),
+      orderItemId: itemId,
+      rating: asIntOr(j['rating']),
+      comment: '${j['comment'] ?? ''}',
+      createdAt: DateTime.tryParse('${j['createdAt'] ?? ''}')?.toLocal() ?? now(),
+    );
+    final at = db.productReviews.indexWhere((x) => x.id == r.id);
+    at < 0 ? db.productReviews.add(r) : db.productReviews[at] = r;
+    return r;
+  }
+
+  @override
+  Future<void> syncProductReviews(String salonId) async {
+    if (api == null || !productReviewsOn0240 || me?.role != Role.salonOwner) return;
+    try {
+      final res = await api!.get('/salons/$salonId/product-reviews', query: {'pageSize': '100'});
+      final list = (res is Map ? (res['data'] as List? ?? const []) : res as List).cast<Map>();
+      final seen = <String>{};
+      for (final j in list) {
+        if (j['status'] == 'DELETED') continue; // HOLA removed it
+        final oid = '${(j['order'] is Map ? (j['order'] as Map)['id'] : null) ?? j['orderId'] ?? ''}';
+        seen.add(_keepProductReview(j, order(oid)).id);
+      }
+      // HOLA deleted some.
+      db.productReviews.removeWhere((r) => r.salonId == salonId && !seen.contains(r.id));
+      db.commit();
+    } catch (e) {
+      debugPrint('Product reviews: sync failed: $e');
+    }
+  }
+
+  @override
+  List<ProductReview> allProductReviews() => [...db.productReviews]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  @override
+  Future<void> deleteProductReview(String id) async {
+    requireRole({Role.salesOfficer});
+    final r = db.productReviews.where((x) => x.id == id).firstOrNull ?? (throw DomainError(tr('Review not found.')));
+    if (api != null && r.id.contains('-')) throw DomainError(tr('HOLA handles this in the HOLA dashboard.'));
+    db.productReviews.remove(r);
+    db.commit();
+  }
 
   @override
   Future<TradeOrder> placeOrder({required String salonId, required List<CartLine> cart, required PaymentMethod payment, String notes = '', String? couponCode}) async {
@@ -199,7 +369,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     if (lines.isEmpty) throw DomainError(tr('Your cart is empty.'));
     // HOLA's catalogue: the order goes to the server, which prices it and reserves stock.
     if (api != null && lines.every((l) => product(l.productId)?.hola ?? false)) {
-      final branch = db.branches.where((b) => b.salonId == salonId).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
+      final branch = db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).firstOrNull ?? (throw DomainError(tr('Salon not found.')));
       try {
         final res =
             await api!.post(
@@ -220,10 +390,14 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
         db.commit();
         // A credit order uses up credit: fetch the new balance.
         if (payment == PaymentMethod.credit) syncCredit(salonId);
+        // Its coupon is now held for this order.
+        if (couponCode != null && couponCode.isNotEmpty) syncCoupons(salonId);
+        // HOLA reserved the stock: refresh what's left to order.
+        syncCatalogue();
         return o;
       } on ApiError catch (e) {
         if (e.code == 'INSUFFICIENT_STOCK') throw DomainError(tr('Some items are no longer in stock in that quantity. Lower the quantity and try again.'));
-        if (e.code == 'COUPON_INVALID') throw _couponError(e);
+        if (e.code.startsWith('COUPON_')) throw _couponError(e);
         if (e.code == 'NOT_ORDERABLE') throw DomainError(tr('Some items can’t be ordered right now. Remove them and try again.'));
         throw apiToDomain(e);
       }
@@ -358,7 +532,12 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
             description: '${j['description'] ?? ''}',
             discountText: '${j['discountText'] ?? ''}',
             usesLeft: j['usesLeft'] == null ? null : asIntOr(j['usesLeft']),
-            products: [for (final p in (j['products'] as List? ?? const [])) p is Map ? '${p['name'] ?? ''}' : '$p'],
+            minOrder: j['minOrderAmount'] == null ? null : money(j['minOrderAmount']),
+            // appliesTo ORDER: the whole order, whatever products are listed.
+            products: '${j['appliesTo'] ?? ''}' == 'ORDER' ? const [] : [for (final p in (j['products'] as List? ?? const [])) p is Map ? '${p['name'] ?? ''}' : '$p'],
+            usedAt: DateTime.tryParse('${j['usedAt'] ?? ''}')?.toLocal(),
+            usedOnOrder: j['usedOnOrder'] is Map ? '${(j['usedOnOrder'] as Map)['code'] ?? ''}' : '',
+            reservedOnOrder: j['reservedOnOrder'] is Map ? '${(j['reservedOnOrder'] as Map)['code'] ?? ''}' : '',
             validUntil: DateTime.tryParse('${j['validUntil'] ?? ''}'),
             validFrom: DateTime.tryParse('${j['validFrom'] ?? ''}'),
             status: '${j['status'] ?? 'AVAILABLE'}'.toUpperCase(),
@@ -368,6 +547,80 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     } catch (e) {
       debugPrint('Coupons: sync failed: $e');
     }
+  }
+
+  /// Salon picks a rider; the rider confirms in their app (proposed to HOLA,
+  /// not live yet). Flip once HOLA confirms the contract.
+  static const riderPickLive = true; // contract 0.15.0
+
+  @override
+  bool get canPickRider => riderPickLive;
+
+  @override
+  Future<List<RiderOption>> ridersFor(String salonId) async {
+    if (!riderPickLive || !_holaSalon(salonId)) return const [];
+    try {
+      final res = await api!.get('/salons/$salonId/riders');
+      return [
+        for (final j in (res is Map ? (res['data'] ?? const []) as List : res as List).cast<Map>())
+          RiderOption(id: '${j['id']}', name: '${j['fullName'] ?? ''}', phone: '${j['phone'] ?? ''}', city: '${j['city'] ?? ''}'),
+      ];
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
+  }
+
+  List<CollectionRequest> _collections = const [];
+
+  @override
+  List<CollectionRequest> collections() => _collections;
+
+  @override
+  Future<void> syncCollections() async {
+    if (!riderPickLive || !_serverRider) return;
+    try {
+      final res = await api!.get('/rider/credit-collections', query: {'status': 'PENDING'});
+      _collections = [
+        for (final j in (res is Map ? (res['data'] ?? const []) as List : res as List).cast<Map>())
+          CollectionRequest(
+            id: '${j['id']}',
+            code: '${j['code'] ?? ''}',
+            salonName: '${(j['salon'] as Map?)?['name'] ?? ''}',
+            salonPhone: '${(j['salon'] as Map?)?['phone'] ?? ''}',
+            address: '${(j['salon'] as Map?)?['address'] ?? ''}',
+            amount: money(j['amount']),
+            createdAt: DateTime.tryParse('${j['createdAt'] ?? ''}')?.toLocal() ?? now(),
+          ),
+      ];
+      db.commit();
+    } catch (e) {
+      debugPrint('Collections: sync failed: $e');
+    }
+  }
+
+  @override
+  Future<void> confirmCollection(String id, int amount) async {
+    requireRole({Role.rider});
+    final c = _collections.where((x) => x.id == id).firstOrNull;
+    if (amount <= 0) throw DomainError(tr('Enter the cash you took.'), field: 'amount');
+    if (c != null && amount > c.amount) throw DomainError(tr('That is more than the salon is paying ({amount}).', {'amount': rs(c.amount)}), field: 'amount');
+    try {
+      await api!.post('/rider/credit-collections/$id/confirm', {'amount': '$amount.00'}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
+    await Future.wait([syncCollections(), syncCash()]);
+  }
+
+  @override
+  Future<void> declineCollection(String id, String reason) async {
+    requireRole({Role.rider});
+    try {
+      await api!.post('/rider/credit-collections/$id/decline', {'reason': reason.trim()}, headers: {'Idempotency-Key': db.newId() + db.newId()});
+    } on ApiError catch (e) {
+      throw apiToDomain(e);
+    }
+    await syncCollections();
   }
 
   /// orderId → the credit payment the rider also collects on that delivery.
@@ -438,23 +691,35 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       rejectReason: str(j['rejectReason']),
       collectedBy: by is Map ? str(by['fullName']) : null,
       decidedBy: decided is Map ? str(decided['fullName']) : null,
+      riderName: j['rider'] is Map ? str((j['rider'] as Map)['fullName']) : null,
       createdAt: at.toLocal(),
       decidedAt: DateTime.tryParse('${j['decidedAt'] ?? ''}')?.toLocal(),
     );
   }
 
   @override
-  Future<void> requestPayment(String salonId, {required PayMethod method, required int amount, String reference = '', String? proofPath, String note = ''}) async {
+  Future<void> requestPayment(String salonId, {required PayMethod method, required int amount, String reference = '', String? proofPath, String note = '', String? riderId}) async {
     requireRole({Role.salonOwner});
     if (!_holaSalon(salonId)) throw DomainError(tr('Payments go through HOLA. Connect to the internet and try again.'));
     if (!paymentRequestsLive) throw DomainError(tr('Paying from the app opens soon. For now, please pay your sales officer.'));
+    // Check against HOLA's latest list, never a stale copy on the phone.
+    await Future.wait([syncCredit(salonId), syncPaymentRequests(salonId)]);
     final owed = payableNow(salonId);
     if (amount <= 0) throw DomainError(tr('Enter the amount you are paying.'), field: 'amount');
-    if (amount > owed) throw DomainError(tr('That is more than you still owe ({amount}).', {'amount': rs(owed)}), field: 'amount');
+    if (amount > owed) {
+      throw DomainError(
+        owed < credit(salonId).outstanding
+            ? tr('Only {amount} is left to pay: the rest is in payments already sent. Cancel one of those to pay it another way.', {'amount': rs(owed)})
+            : tr('That is more than you still owe ({amount}).', {'amount': rs(owed)}),
+        field: 'amount',
+      );
+    }
     if (method == PayMethod.online && reference.trim().isEmpty) throw DomainError(tr('Enter the transaction ID from your receipt.'), field: 'reference');
     if (method == PayMethod.online && proofPath == null) throw DomainError(tr('Add a photo of the receipt or transfer screenshot.'));
-    if (method == PayMethod.rider && paymentRequests(salonId).any((r) => r.method == PayMethod.rider && r.open)) {
-      throw DomainError(tr('The rider is already collecting a payment from you. Cancel it first to change it.'));
+    if (method == PayMethod.rider && riderPickLive && riderId == null) throw DomainError(tr('Choose the rider you are paying.'), field: 'riderId');
+    // HOLA allows one open rider payment at a time (waiting or collected).
+    if (paymentRequests(salonId).where((r) => r.method == PayMethod.rider && r.open).firstOrNull case final w? when method == PayMethod.rider) {
+      throw DomainError(tr('{code} for {amount} is still waiting for the rider. Cancel it on this screen to send a new one.', {'code': w.code, 'amount': rs(w.amount)}));
     }
     String? proofId;
     try {
@@ -465,7 +730,14 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       }
       final res = await api!.post(
         '/salons/$salonId/credit/payment-requests',
-        {'method': method.api, 'amount': '$amount.00', if (reference.trim().isNotEmpty) 'reference': reference.trim(), 'proofFileId': ?proofId, if (note.trim().isNotEmpty) 'note': note.trim()},
+        {
+          'method': method.api,
+          'amount': '$amount.00',
+          if (reference.trim().isNotEmpty) 'reference': reference.trim(),
+          'proofFileId': ?proofId,
+          if (note.trim().isNotEmpty) 'note': note.trim(),
+          if (method == PayMethod.rider && riderPickLive) 'riderId': ?riderId,
+        },
         headers: {'Idempotency-Key': db.newId() + db.newId()},
       );
       final r = res is Map ? _payRequest(res, salonId) : null;
@@ -499,10 +771,14 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       'ORDER_CHARGE' || 'CHARGE' => 'CHARGE',
       'PAYMENT' => 'PAYMENT',
       'REVERSAL' => 'REVERSAL',
+      'RETURN' => 'RETURN', // a returned product taken off (0.23.0)
       _ => 'ADJUSTMENT',
     };
     final order = j['order'];
-    final ref = '${j['orderCode'] ?? (order is Map ? order['code'] : null) ?? ''}';
+    final ret = j['return'];
+    // A RETURN line names its return in the note ("Return HR-000001 (order HO-…)").
+    final retCode = j['returnCode'] ?? (ret is Map ? ret['code'] : null) ?? (kind == 'RETURN' ? RegExp(r'HR-\d+').firstMatch('${j['note'] ?? ''}')?.group(0) : null);
+    final ref = '${retCode ?? j['orderCode'] ?? (order is Map ? order['code'] : null) ?? ''}';
     final bal = j['balance'];
     return CreditEntry(
       id: '${j['id'] ?? '$type-${at.toIso8601String()}'}',
@@ -541,6 +817,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
           qty: asIntOr(x['qty'] ?? x['quantity']),
           freeQty: asIntOr(x['freeQty']),
           unitPrice: money(x['unitPrice'] ?? x['tradePrice']),
+          itemId: '${x['id'] ?? x['orderItemId'] ?? ''}',
         ),
     ];
     final id = '${j['id']}';
@@ -554,7 +831,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       payment: payment,
       notes: '${j['notes'] ?? ''}',
       status: '${j['status'] ?? OrderStatus.placed}',
-      history: old?.history ?? [StatusEvent('${j['status'] ?? OrderStatus.placed}', now(), by)],
+      history: _history(old, j, by),
       createdAt: DateTime.tryParse('${j['createdAt']}')?.toLocal() ?? now(),
     );
     o
@@ -565,6 +842,16 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       ..handoverId = old?.handoverId
       ..signature = old?.signature
       ..deliveredWhere = old?.deliveredWhere;
+    // A replacement HOLA made for a return (contract 0.23.0).
+    if (j['replacementOf'] case final Map r) {
+      o
+        ..replacementFor = '${r['returnCode'] ?? r['code'] ?? ''}'
+        ..replacementOfOrder = '${r['orderCode'] ?? old?.replacementOfOrder ?? ''}';
+    } else {
+      o
+        ..replacementFor = old?.replacementFor
+        ..replacementOfOrder = old?.replacementOfOrder;
+    }
     final coupon = j['coupon'];
     if (coupon is Map) {
       o
@@ -585,12 +872,33 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     return o;
   }
 
+  /// The order's steps so far: what this phone already had, plus the
+  /// server's current status when it moved on (with the cancel reason).
+  List<StatusEvent> _history(TradeOrder? old, J j, String by) {
+    final status = '${j['status'] ?? OrderStatus.placed}';
+    final h = [...?old?.history];
+    if (h.isEmpty || h.last.status != status) {
+      final when =
+          DateTime.tryParse('${j['cancelledAt'] ?? j['statusChangedAt'] ?? j['updatedAt'] ?? ''}')?.toLocal() ?? (h.isEmpty ? DateTime.tryParse('${j['createdAt']}')?.toLocal() : null) ?? now();
+      final reason = status == OrderStatus.cancelled ? '${j['cancelReason'] ?? j['cancellationReason'] ?? j['reason'] ?? ''}'.trim() : '';
+      h.add(StatusEvent(status, when, by, reason.isEmpty ? null : reason));
+    }
+    return h;
+  }
+
   /// HOLA's delivery block on an order: who received it, the cash, why it
   /// failed, and when each step happened.
   void _applyDelivery(TradeOrder o, Object? raw) {
     if (raw is! Map) return;
     final d = raw;
     if (d['recipientName'] is String) o.recipientName = d['recipientName'] as String;
+    // The delivery's rider (salon side), so the salon can message them.
+    if (d['rider'] case final Map r when r['id'] is String) {
+      o.riderId = r['id'] as String;
+      mirrorPerson(db, o.riderId!, '${r['fullName'] ?? r['name'] ?? ''}', role: Role.rider, phone: '${r['phone'] ?? ''}');
+    } else if (d['riderId'] is String) {
+      o.riderId = d['riderId'] as String;
+    }
     if (d['cashCollected'] != null) o.cashCollected = money(d['cashCollected']);
     if (d['failReason'] is String) o.failReason = d['failReason'] as String;
     DateTime? t(String k) => DateTime.tryParse('${d[k]}')?.toLocal();
@@ -662,7 +970,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     }
     // The address snapshot from when the order was placed.
     final b = to['branch'];
-    final branchId = '${b is Map ? b['id'] : to['branchId'] ?? '$salonId~delivery'}';
+    final branchId = '${b is Map ? b['id'] : to['branchId'] ?? j['branchId'] ?? '$salonId~delivery'}';
     final branchName = '${b is Map ? b['name'] ?? '' : b ?? ''}';
     var br = db.branches.where((x) => x.id == branchId).firstOrNull;
     if (br == null) {
@@ -726,7 +1034,12 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
     final me = requireMe;
     if (_onServer(o)) {
       if (reason.trim().length < 3) throw DomainError(tr('Add the reason for cancelling.'));
-      return _serverAction(o, 'cancel', {'reason': reason.trim()});
+      await _serverAction(o, 'cancel', {'reason': reason.trim()});
+      // A coupon on this order is free to use again.
+      if (o.couponCode?.isNotEmpty ?? false) await syncCoupons(o.salonId).catchError((Object _) {});
+      // Its stock goes back on sale.
+      syncCatalogue();
+      return;
     }
     final s = _salon(o.salonId);
     if (me.role == Role.salonOwner) {
@@ -758,7 +1071,7 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
       ..riderId = rider.id
       ..failReason = null;
     final s = _salon(o.salonId);
-    final b = db.branches.where((b) => b.salonId == s.id).firstOrNull;
+    final b = db.branches.where((b) => b.salonId == s.id && !b.id.endsWith('~delivery')).firstOrNull;
     final one = o.units == 1;
     db.notify(
       rider.id,
@@ -950,10 +1263,48 @@ class LocalTradeRepository extends LocalRepository implements TradeRepository {
             },
           ),
       ];
+      await _syncHandovers();
       db.commit();
     } catch (e) {
       debugPrint('Cash: sync failed: $e'); // offline: keep the last copy
     }
+  }
+
+  /// HOLA's list of this rider's hand-overs, with what finance confirmed.
+  Future<void> _syncHandovers() async {
+    final me = requireMe.id;
+    final res = await api!.get('/rider/cash-handovers');
+    final list = (res is Map ? (res['data'] as List? ?? const []) : res as List).cast<Map>();
+    final seen = <String>{};
+    for (final h in list) {
+      final id = '${h['id']}';
+      seen.add(id);
+      final codes = {
+        for (final p in (h['payments'] as List? ?? const []).cast<Map>())
+          if (p['orderCode'] != null) '${p['orderCode']}',
+      };
+      final ho = CashHandover(
+        id: id,
+        riderId: me,
+        orderIds: [
+          for (final o in db.orders)
+            if (codes.contains(o.code)) o.id,
+        ],
+        amount: money(h['amount']),
+        at: DateTime.tryParse('${h['createdAt']}')?.toLocal() ?? now(),
+        status: '${h['status'] ?? 'PENDING'}',
+        confirmedById: (h['confirmedBy'] as Map?)?['id'] as String?,
+        confirmedAt: DateTime.tryParse('${h['confirmedAt'] ?? ''}')?.toLocal(),
+        paymentCount: (h['payments'] as List?)?.length,
+      );
+      for (final o in db.orders.where((o) => codes.contains(o.code))) {
+        o.handoverId = id;
+      }
+      final i = db.handovers.indexWhere((x) => x.id == id);
+      i < 0 ? db.handovers.add(ho) : db.handovers[i] = ho;
+    }
+    // Hand-overs HOLA doesn't have (merged, or from an older build) go.
+    db.handovers.removeWhere((x) => x.riderId == me && !seen.contains(x.id));
   }
 
   /// POST /rider/cash-handovers with every payment the rider holds.
@@ -1053,6 +1404,8 @@ Product mirrorProduct(Map j, int i) {
         retailPrice: money(v['retailPrice']),
         // How many can be ordered; without a count, in stock means orderable.
         stock: v['available'] is num ? (v['available'] as num).toInt() : (v['inStock'] == false ? 0 : 999),
+        sku: v['sku'] is String ? v['sku'] as String : '',
+        size: v['size'] is String ? v['size'] as String : '',
       ),
   ];
   // The first current scheme: buy N, get M free.
@@ -1075,6 +1428,11 @@ Product mirrorProduct(Map j, int i) {
     schemeFree: free,
     createdAt: DateTime(2026),
     imageUrl: j['imageUrl'] is String ? j['imageUrl'] as String : '',
+    imageUrls: [
+      for (final u in (j['imageUrls'] as List? ?? const []))
+        if (u is String) u,
+    ],
+    brand: j['brand'] is String ? j['brand'] as String : '',
     hola: true,
   );
 }

@@ -6,8 +6,10 @@ import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
 import '../../../shared/widgets/actions.dart';
 import '../../../shared/widgets/ui.dart';
+import '../../chat/chat.dart';
 import '../viewmodels/trade_view_models.dart';
 import '../widgets/trade_widgets.dart';
+import 'returns_pages.dart';
 
 /// One trade order: tracker, items, delivery proof and the actions the
 /// signed-in role is allowed (salon owner or HOLA sales officer).
@@ -16,8 +18,10 @@ class OrderDetailPage extends StatelessWidget {
   final String id;
 
   @override
-  Widget build(BuildContext context) =>
-      ChangeNotifierProvider(create: (c) => OrderDetailViewModel(c.read<TradeRepository>(), c.read<SalonRepository>(), c.read<AuthRepository>(), id), child: const _Body());
+  Widget build(BuildContext context) => ChangeNotifierProvider(
+    create: (c) => OrderDetailViewModel(c.read<TradeRepository>(), c.read<SalonRepository>(), c.read<AuthRepository>(), id, chat: c.read<ChatRepository>(), returns: c.read<ReturnRepository>()),
+    child: const _Body(),
+  );
 }
 
 enum _St { done, cur, todo, bad }
@@ -75,7 +79,7 @@ class _Body extends StatelessWidget {
           for (final s in flow)
             if (o.at(s) != null) s,
         ];
-        final note = o.history.lastWhere((h) => h.status == OrderStatus.cancelled).note ?? '';
+        final note = o.history.where((h) => h.status == OrderStatus.cancelled).lastOrNull?.note ?? '';
         return [
           for (final s in reached) _Step(tr(_labels[s]!), sub(s), _St.done),
           _Step(tr('Cancelled'), [_when(o, OrderStatus.cancelled), note].where((x) => x.isNotEmpty).join(' · '), _St.bad),
@@ -131,10 +135,26 @@ class _Body extends StatelessWidget {
             Padding(padding: const EdgeInsets.only(top: 6), child: StatusBadge(o.status)),
           ],
         ),
+        if (o.replacementFor != null) ...[
+          const SizedBox(height: 12),
+          HCard(
+            color: c.okSoft,
+            child: Text(
+              tr('Replacement for return {code} (order {order}). Free of charge.', {'code': o.replacementFor, 'order': o.replacementOfOrder ?? ''}),
+              style: T.sm(context).copyWith(color: c.ok),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         HCard(
           child: Column(children: [for (final (i, s) in steps.indexed) _StepRow(s, last: i == steps.length - 1)]),
         ),
+        if (vm.orderReturns.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          SecHead(tr('Returns')),
+          const SizedBox(height: 12),
+          for (final r in vm.orderReturns) Padding(padding: const EdgeInsets.only(bottom: 10), child: ReturnCard(r)),
+        ],
         if (vm.isOfficer && o.status == OrderStatus.underReview && vm.credit != null) ...[
           const SizedBox(height: 16),
           _ReviewNote(order: o, credit: vm.credit!),
@@ -158,6 +178,21 @@ class _Body extends StatelessWidget {
                         Text(l.name, style: T.ttl(context)),
                         Text('${l.qty} × ${rs(l.unitPrice)}', style: T.sub(context)),
                         if (l.freeQty > 0) Padding(padding: const EdgeInsets.only(top: 4), child: SchemeBadge(tr('+{n} free', {'n': l.freeQty}))),
+                        if (vm.myRatings[l.variantId] case final r?)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                Stars(r.rating, size: 12),
+                                if (r.comment.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(r.comment, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.cap(context)),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -227,11 +262,73 @@ class _Body extends StatelessWidget {
           block: true,
           onTap: () => attempt(vm.confirmReceipt, success: tr('Receipt confirmed'), confetti: true),
         ),
+      if (vm.canRate) HButton(vm.myRatings.isEmpty ? tr('Rate these products') : tr('Rate the other products'), icon: 'star', kind: BtnKind.secondary, block: true, onTap: () => _rate(context, vm, o)),
+      if (vm.canReturn)
+        HButton(
+          tr('Return products'),
+          icon: 'again',
+          kind: BtnKind.secondary,
+          block: true,
+          onTap: () => pushPage(context, NewReturnPage(orderId: o.id)),
+        ),
       if (vm.canApprove) HButton(o.status == OrderStatus.underReview ? tr('Approve over limit') : tr('Approve order'), icon: 'check', block: true, onTap: () => _approve(context, vm, o)),
       if (vm.canDispatch) HButton(o.status == OrderStatus.failed ? tr('Re-dispatch to a rider') : tr('Dispatch to a rider'), icon: 'truck', block: true, onTap: () => _dispatch(context, vm)),
+      if (vm.canMessageRider)
+        HButton(
+          tr('Message {name}', {'name': vm.rider?.firstName ?? tr('the rider')}),
+          icon: 'msg',
+          kind: BtnKind.secondary,
+          block: true,
+          onTap: () => openChat(context, salonId: o.salonId, riderId: o.riderId, orderId: o.id),
+        ),
       if (vm.canOwnerCancel || vm.canOfficerCancel) HButton(tr('Cancel order'), kind: BtnKind.ghost, block: true, small: true, onTap: () => _cancel(context, vm)),
     ];
     return buttons;
+  }
+
+  /// Stars and a comment per product not rated yet.
+  Future<void> _rate(BuildContext context, OrderDetailViewModel vm, TradeOrder o) async {
+    final todo = o.lines.where((l) => !vm.myRatings.containsKey(l.variantId)).toList();
+    final stars = <String, int>{};
+    final notes = {for (final l in todo) l.variantId: TextEditingController()};
+    await showHSheet<void>(
+      context,
+      (ctx) => StatefulBuilder(
+        builder: (ctx, set) => VStack(gap: 14, [
+          SheetHead(tr('Rate HOLA products'), sub: tr('Your rating goes to HOLA and helps other salons choose.')),
+          for (final l in todo) ...[
+            Text(l.name, style: T.ttl(ctx)),
+            Row(
+              children: [
+                for (var i = 1; i <= 5; i++)
+                  Tap(
+                    onTap: () => set(() => stars[l.variantId] = i),
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: HIcon('star', size: 32, fill: i <= (stars[l.variantId] ?? 0), color: i <= (stars[l.variantId] ?? 0) ? ctx.c.accent : ctx.c.line),
+                    ),
+                  ),
+              ],
+            ),
+            HField(hint: tr('What did you like or not? (optional)'), controller: notes[l.variantId]),
+          ],
+          HButton(
+            tr('Send ratings'),
+            icon: 'check',
+            block: true,
+            onTap: stars.values.every((s) => s == 0)
+                ? null
+                : () async {
+                    final ok = await attempt(() => vm.rate({for (final e in stars.entries) e.key: (e.value, notes[e.key]!.text)}), success: tr('Thanks for rating'));
+                    if (ok && ctx.mounted) Navigator.pop(ctx);
+                  },
+          ),
+        ]),
+      ),
+    );
+    for (final n in notes.values) {
+      n.dispose();
+    }
   }
 
   Future<void> _approve(BuildContext context, OrderDetailViewModel vm, TradeOrder o) async {

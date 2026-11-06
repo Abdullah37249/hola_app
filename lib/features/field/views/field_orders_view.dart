@@ -49,11 +49,7 @@ class _Body extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          KpiStrip([
-            Kpi(tr('This week'), vm.thisWeek, icon: 'box'),
-            Kpi(tr('Open value'), vm.openValue / 1000, format: (v) => vm.openValue == 0 ? '0' : '${v.toStringAsFixed(1)}k', icon: 'cash'),
-            Kpi(tr('In delivery'), vm.count('delivery'), icon: 'truck'),
-          ]),
+          KpiStrip([Kpi(tr('This week'), vm.thisWeek, icon: 'box'), Kpi(tr('Open value'), vm.openValue, format: shortNum, icon: 'cash'), Kpi(tr('In delivery'), vm.count('delivery'), icon: 'truck')]),
           const SizedBox(height: 16),
         ]),
         if (pending.isNotEmpty) ...[
