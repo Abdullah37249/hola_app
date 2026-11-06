@@ -286,9 +286,6 @@ class LocalBookingRepository extends LocalRepository implements BookingRepositor
   List<Appointment> forSalon(String salonId) => db.appointments.where((a) => a.salonId == salonId).toList()..sort((a, b) => a.startsAt.compareTo(b.startsAt));
 
   @override
-  List<Appointment> forStaff(String staffId) => db.appointments.where((a) => a.staffId == staffId).toList()..sort((a, b) => a.startsAt.compareTo(b.startsAt));
-
-  @override
   bool canCancelFree(Appointment a) => a.hola ? (a.freeCancelUntil == null || now().isBefore(a.freeCancelUntil!)) : _canCancelFreeHere(a);
   bool _canCancelFreeHere(Appointment a) => a.startsAt.difference(now()).inMinutes >= _salon(a.salonId).cancelWindowHours * 60;
 

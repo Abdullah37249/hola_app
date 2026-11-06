@@ -28,12 +28,6 @@ mixin CustomerLookups {
   /// What [x] costs after the offer that would apply now.
   int priceAfterOffer(ServiceItem x) => x.price - (offerFor(x.id)?.discountOn(x.price) ?? 0);
 
-  /// "Gulberg III, Lahore" for the salon's first branch.
-  String placeOf(String salonId) {
-    final b = salons.branches(salonId).firstOrNull;
-    return b == null ? '' : [b.area, b.city].where((x) => x.isNotEmpty).join(', ');
-  }
-
   /// Bookable professionals with their account names.
   /// With [branchId], only those who work at that branch.
   List<(StaffProfile, String)> team(String salonId, {String? branchId}) {

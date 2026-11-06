@@ -137,7 +137,6 @@ class NewOrderViewModel extends RepoViewModel {
   }
 
   int qty(Product p, Variant v) => _cart[(p.id, v.id)] ?? 0;
-  int productQty(Product p) => _cart.entries.where((e) => e.key.$1 == p.id).fold(0, (s, e) => s + e.value);
 
   /// Highest qty that still leaves stock for the scheme's free units.
   int maxQty(Product p, Variant v) {

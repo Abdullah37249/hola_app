@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../app/viewmodels/session_view_model.dart';
+import '../../../core/app_version.dart';
 import '../../../core/utils/sfx.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/repositories.dart';
@@ -220,7 +221,7 @@ class SignOutButton extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          'HOLA Professional 1.0.0',
+          'HOLA Professional $kAppVersion',
           textAlign: TextAlign.center,
           style: T.cap(context).copyWith(color: c.subtle),
         ),

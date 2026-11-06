@@ -382,6 +382,8 @@ class ProductThumb extends StatelessWidget {
               child: Image.network(
                 p.imageUrl,
                 fit: BoxFit.contain,
+                // Thumbnails in lists: decode at about display size, not the full photo.
+                cacheWidth: (size * 3).round(),
                 errorBuilder: (_, _, _) => Bottle(color: p.color, shape: p.shape, height: size * 1.3, scale: size / 100),
               ),
             )

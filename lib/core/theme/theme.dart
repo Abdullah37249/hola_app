@@ -158,24 +158,10 @@ class G {
   /// Headline highlight (top KPI, seals, progress): luminous blue.
   static const flame = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1E55A8), Color(0xFF123871)]);
 
-  /// HOLA orange, for the few places that must stand apart from the blue.
-  static const orange = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFFF9F2E), Color(0xFFE86F00)]);
   static const ok = LinearGradient(colors: [Color(0xFF22A866), Color(0xFF14854E)]);
   static const danger = LinearGradient(colors: [Color(0xFFFF4D5E), Color(0xFFD1142B)]);
   static const credit = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF02050C), Color(0xFF0A2457), Color(0xFF144693)], stops: [0, .55, 1]);
   static const progress = LinearGradient(colors: [Color(0xFF7FA3D9), Color(0xFF144693), Color(0xFF123871)], stops: [0, .55, 1]);
-
-  /// Header: the poster's night sky. The role only tints the glow a little.
-  static (LinearGradient, Color, Color) band(String role) {
-    const base = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF000000), Color(0xFF020814), Color(0xFF041230)], stops: [0, .5, 1]);
-    final glow = switch (role) {
-      'salon' => const Color(0xFF4F7BFF), // indigo blue
-      'rider' => const Color(0xFF3FA9FF), // sky
-      'field' => const Color(0xFF2F80FF),
-      _ => const Color(0xFF2F80FF),
-    };
-    return (base, glow, glow);
-  }
 
   /// Category tile gradients (8 cool tones, cycled).
   static const cats = [

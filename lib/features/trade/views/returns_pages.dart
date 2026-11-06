@@ -291,7 +291,7 @@ class ReturnPhotoPicker extends StatelessWidget {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(14),
-                        child: Image.file(File(p), fit: BoxFit.cover),
+                        child: Image.file(File(p), fit: BoxFit.cover, cacheWidth: 300), // 84 px thumb: no full-size decode
                       ),
                       PositionedDirectional(
                         top: 4,

@@ -81,9 +81,6 @@ class FeedbackViewModel extends RepoViewModel with CustomerLookups {
     }
     return [for (final i in ids) ?salons.salon(i)];
   }
-
-  Future<void> raise({required String salonId, String? appointmentId, required String topic, required String text}) =>
-      engage.raiseComplaint(salonId: salonId, appointmentId: appointmentId, topic: topic, text: text);
 }
 
 /// Topics a customer can raise feedback about. Fixed vocabulary.

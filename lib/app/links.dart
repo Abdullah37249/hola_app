@@ -47,7 +47,8 @@ void openLink(BuildContext context, NotifLink link) {
           ? TrainingPage(id: link.id)
           : null,
     'review' => salonSide ? const ReviewsPage() : _customerReview(context, link.id),
-    'complaint' => salonSide ? const FeedbackInboxPage() : const MyFeedbackPage(),
+    // Complaints were switched off on HOLA (0.30.0): an old push opens nothing.
+    'complaint' when context.read<EngagementRepository>().complaintsOn => salonSide ? const FeedbackInboxPage() : const MyFeedbackPage(),
     'chat' => ChatPage(threadId: link.id),
     'return' => role == Role.salonOwner || role == Role.salesOfficer ? ReturnDetailPage(id: link.id) : null,
     'leave' => role == Role.salonOwner ? const LeaveRequestsPage() : null,

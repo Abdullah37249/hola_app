@@ -2081,14 +2081,6 @@ class FootBar extends StatelessWidget {
   );
 }
 
-/// Vertical spacing helper.
-class Gap extends StatelessWidget {
-  final double s;
-  const Gap(this.s, {super.key});
-  @override
-  Widget build(BuildContext context) => SizedBox(height: s, width: s);
-}
-
 /// Column with uniform gap (prototype `display:grid;gap`).
 class VStack extends StatelessWidget {
   final List<Widget> children;

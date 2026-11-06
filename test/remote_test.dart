@@ -103,7 +103,9 @@ class FakeHola {
     final path = req.url.path.replaceFirst('/api/v1', '');
     calls.add('${req.method} $path');
     queries[path] = req.url.queryParameters;
-    final body = req.body.isEmpty || !(req.headers['content-type'] ?? '').startsWith('application/json') ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
+    // Only JSON bodies are read as text; photo bytes stay binary.
+    final isJson = (req.headers['content-type'] ?? '').startsWith('application/json');
+    final body = !isJson || req.bodyBytes.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
     bodies['${req.method} $path'] = body;
     switch ('${req.method} $path') {
       case 'POST /auth/login':
@@ -740,7 +742,11 @@ void main() {
     );
     hola.calls.clear();
     await api.login('noor@salon.pk', pw);
-    final id = await api.uploadFile(List.filled(1234, 7), contentType: 'image/jpeg', purpose: 'salon_photo', fileName: 'front.jpg');
+    // A JPEG starts FF D8 FF; the rest is filler.
+    final jpeg = [0xFF, 0xD8, 0xFF, ...List.filled(1231, 7)];
+    // Not a photo (no image signature): refused before anything is sent.
+    await expectLater(api.uploadFile(List.filled(1234, 7), contentType: 'image/jpeg', purpose: 'salon_photo'), throwsA(isA<DomainError>()));
+    final id = await api.uploadFile(jpeg, contentType: 'image/jpeg', purpose: 'salon_photo', fileName: 'front.jpg');
     expect(id, 'file-1');
     expect(hola.bodies['POST /files'], {'purpose': 'salon_photo', 'contentType': 'image/jpeg', 'sizeBytes': 1234, 'fileName': 'front.jpg'});
     expect(hola.uploaded, ('image/jpeg', 1234));

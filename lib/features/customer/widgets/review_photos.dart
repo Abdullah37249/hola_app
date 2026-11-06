@@ -91,7 +91,7 @@ class ReviewPhotoPicker extends StatelessWidget {
             children: [
               for (final (i, (path, kind)) in photos.indexed) ...[
                 _Thumb(
-                  image: Image.file(File(path), fit: BoxFit.cover),
+                  image: Image.file(File(path), fit: BoxFit.cover, cacheWidth: 300),
                   label: reviewPhotoLabel(kind),
                   onRemove: () => onChanged([...photos]..removeAt(i)),
                 ),

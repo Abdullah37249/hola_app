@@ -64,9 +64,6 @@ class LocalSalonRepository extends LocalRepository implements SalonRepository {
   Salon? salon(String id) => db.salons.where((s) => s.id == id).firstOrNull;
 
   @override
-  Salon? salonOfOwner(String accountId) => db.salons.where((s) => s.ownerId == accountId).firstOrNull;
-
-  @override
   // '~delivery' is a rider's copy of a delivery address, not a real branch.
   List<Branch> branches(String salonId) => db.branches.where((b) => b.salonId == salonId && !b.id.endsWith('~delivery')).toList();
 

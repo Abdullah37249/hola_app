@@ -23,12 +23,6 @@ abstract class LocalRepository implements Observable {
   Account? get me => db.sessionAccountId == null ? null : db.accounts.where((a) => a.id == db.sessionAccountId).firstOrNull;
   Account get requireMe => me ?? (throw DomainError(tr('Please sign in again.')));
 
-  /// Salon the signed-in owner or staff member works at.
-  Salon get mySalon {
-    final id = requireMe.salonId;
-    return db.salons.where((s) => s.id == id).firstOrNull ?? (throw DomainError(tr('Set up your salon first.')));
-  }
-
   void requireRole(Set<Role> roles) {
     if (!roles.contains(requireMe.role)) throw DomainError(tr("Your account can't do that."));
   }

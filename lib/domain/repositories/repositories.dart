@@ -117,7 +117,6 @@ abstract interface class SalonRepository implements Observable {
   /// Active salons customers can book, optionally filtered.
   List<Salon> discover({String query = '', String? category, String? city});
   Salon? salon(String id);
-  Salon? salonOfOwner(String accountId);
   List<Branch> branches(String salonId);
   Branch? branch(String id);
   List<ServiceItem> services(String salonId, {bool activeOnly = false});
@@ -238,7 +237,6 @@ abstract interface class BookingRepository implements Observable {
   Appointment? appointment(String id);
   List<Appointment> forCustomer(String customerId);
   List<Appointment> forSalon(String salonId);
-  List<Appointment> forStaff(String staffId);
 
   /// HOLA's client list for a salon, as last loaded by [syncClients]
   /// (empty when offline or before the first load).

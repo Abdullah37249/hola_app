@@ -79,8 +79,6 @@ class DeliveriesViewModel extends RepoViewModel {
   }
 
   bool get isEmpty => _all.isEmpty;
-  int get toDeliver => outForDelivery.length + assigned.length;
-  int get deliveredToday => _all.where((o) => sameDay(o.at(OrderStatus.delivered) ?? DateTime(0), now())).length;
   int get cashToCollect => [...outForDelivery, ...assigned].where((o) => o.isCod).fold(0, (t, o) => t + o.total);
 
   Stop stop(TradeOrder o) {

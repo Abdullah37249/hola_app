@@ -8,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/repositories.dart';
+import '../app_version.dart';
 import '../network/api.dart';
 import 'push_events.dart';
 import 'reminders.dart';
@@ -226,6 +227,9 @@ NotifLink? pushLink(Map<String, dynamic> d) {
   };
   // Complaints and reviews open their lists; the rest need the entity.
   if (id.isEmpty && kind != 'complaint' && kind != 'review' && kind != 'offers' && kind != 'service_offer') return null;
+  // Ids go into API paths: accept only plain ids (HOLA's UUIDs, codes), never
+  // anything with slashes, dots or spaces that could point somewhere else.
+  if (id.isNotEmpty && !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(id)) return null;
   return NotifLink(kind, id);
 }
 

@@ -11,22 +11,6 @@ import '../views/salon_view.dart';
 /// Icon per service category.
 const categoryIcons = {'Hair': 'scissors', 'Colour': 'color', 'Nails': 'hand', 'Skin': 'drop', 'Bridal': 'sparkle', 'Barber': 'scissors', 'Spa': 'layers', 'Makeup': 'star'};
 
-/// Small frosted tag drawn over salon art.
-class GlassTag extends StatelessWidget {
-  final String label;
-  const GlassTag(this.label, {super.key});
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(color: Colors.white.withValues(alpha: .88), borderRadius: BorderRadius.circular(999)),
-    child: Text(
-      label,
-      maxLines: 1,
-      style: const TextStyle(fontFamily: T.f, fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1D1D1F)),
-    ),
-  );
-}
-
 /// Rating chip, or "New" when the salon has no reviews yet.
 class RatingOrNew extends StatelessWidget {
   final SalonRating r;

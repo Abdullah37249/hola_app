@@ -13,7 +13,6 @@ import '../../domain/repositories/repositories.dart' show DomainError;
 typedef J = Map<String, dynamic>;
 
 /// Sent with the push registration; keep in step with pubspec.yaml.
-const kAppVersion = '0.1.0';
 
 /// HOLA API base (staging until production is announced).
 const kHolaApi = 'https://hola.metaxperts.net/api/v1';
@@ -271,6 +270,9 @@ class HolaApi {
   /// Uploads a file in HOLA's two steps (declare it, then send the bytes)
   /// and returns its id.
   Future<String> uploadFile(List<int> bytes, {required String contentType, required String purpose, String? fileName}) async {
+    // The file's real type from its first bytes, not its name; only photos.
+    contentType = photoType(bytes) ?? (throw DomainError(tr('That file isn’t a photo HOLA can take. Use a JPG or PNG.')));
+    if (bytes.length > maxUploadBytes) throw DomainError(tr('That photo is too large. Pick one under 10 MB.'));
     // The same photo again soon (a retry after a timeout): reuse its file, so
     // the retried request is identical and HOLA replays it (see _retryKeys).
     final sig = '$purpose|${bytes.length}|${Object.hashAll([for (var i = 0; i < bytes.length; i += 997) bytes[i]])}';
@@ -394,6 +396,19 @@ class HolaApi {
         if (e is Map) '${e['path']}': '${e['message']}',
     });
   }
+}
+
+/// Largest photo the app uploads.
+const maxUploadBytes = 10 * 1024 * 1024;
+
+/// JPG, PNG, WebP or HEIC, judged by the file's first bytes; null otherwise.
+String? photoType(List<int> b) {
+  bool at(int i, List<int> sig) => b.length >= i + sig.length && [for (var k = 0; k < sig.length; k++) b[i + k] == sig[k]].every((x) => x);
+  if (at(0, [0xFF, 0xD8, 0xFF])) return 'image/jpeg';
+  if (at(0, [0x89, 0x50, 0x4E, 0x47])) return 'image/png';
+  if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return 'image/webp';
+  if (at(4, [0x66, 0x74, 0x79, 0x70]) && (at(8, 'heic'.codeUnits) || at(8, 'heix'.codeUnits) || at(8, 'mif1'.codeUnits))) return 'image/heic';
+  return null;
 }
 
 /// Local midnight (or any local time) as ISO 8601 with the phone's offset,

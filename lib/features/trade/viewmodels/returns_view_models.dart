@@ -37,7 +37,6 @@ class ReturnsViewModel extends RepoViewModel {
   List<ReturnRequest> get all => returns.returns(salonId: salonId);
   List<ReturnRequest> get open => all.where((r) => r.isOpen).toList();
   List<ReturnRequest> get closed => all.where((r) => !r.isOpen).toList();
-  int get needsAnswer => all.where((r) => r.status == ReturnStatus.awaitingSalon).length;
 
   Future<void> reload() => returns.syncReturns();
 }

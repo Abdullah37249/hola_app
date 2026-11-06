@@ -15,7 +15,6 @@ const Map<String, String> urRider = {
   'HOLA assigns trade orders to you. They will appear here, and you will get a notification.': 'HOLA آپ کو ٹریڈ آرڈرز تفویض کرتا ہے۔ وہ یہاں نظر آئیں گے، اور آپ کو نوٹیفکیشن ملے گا۔',
   'All caught up': 'سب کام مکمل',
   'Nothing left to deliver right now. New orders appear here with a notification.': 'اس وقت ڈیلیور کرنے کو کچھ باقی نہیں۔ نئے آرڈرز نوٹیفکیشن کے ساتھ یہاں نظر آئیں گے۔',
-  'On the way': 'راستے میں',
   'Up next': 'اگلی باری',
   "Couldn't deliver": 'ڈیلیور نہیں ہو سکا',
   'Delivered this week': 'اس ہفتے ڈیلیور ہوئیں',
@@ -36,8 +35,6 @@ const Map<String, String> urRider = {
   'When you hand cash to HOLA it is listed here, with who confirmed it and when.': 'جب آپ HOLA کو نقد رقم حوالے کریں گے تو وہ یہاں درج ہوگی، تصدیق کرنے والے اور وقت کے ساتھ۔',
   'Confirmed by {name} · {day} {time}': '{name} نے تصدیق کی · {day} {time}',
   'Handed over {day} {time} · {deliveries}': '{day} {time} کو حوالے کی · {deliveries}',
-  'Confirmed': 'تصدیق شدہ',
-  'Pending': 'زیر التوا',
   'More': 'مزید',
 
   // Delivery page
@@ -45,7 +42,6 @@ const Map<String, String> urRider = {
   'Delivery not found': 'ڈیلیوری نہیں ملی',
   'It may have been cancelled by HOLA.': 'ہو سکتا ہے HOLA نے اسے منسوخ کر دیا ہو۔',
   'Not delivered: {reason}. HOLA will re-assign this order.': 'ڈیلیور نہیں ہوا: {reason}۔ HOLA یہ آرڈر دوبارہ تفویض کرے گا۔',
-  'Salon owner': 'سیلون کے مالک',
   'Salon phone': 'سیلون کا فون',
   'Salon': 'سیلون',
   'On HOLA credit, no cash': 'HOLA کریڈٹ پر، کوئی نقد نہیں',
@@ -57,7 +53,6 @@ const Map<String, String> urRider = {
   'Items · {units}': 'آئٹمز · {units}',
   '{qty} + {n} free': '{qty} + {n} مفت',
   'Proof of delivery': 'ڈیلیوری کا ثبوت',
-  'Delivered': 'ڈیلیور ہو گیا',
   'Received by': 'وصول کنندہ',
   'Cash collected': 'وصول شدہ نقد',
   'Start delivery': 'ڈیلیوری شروع کریں',

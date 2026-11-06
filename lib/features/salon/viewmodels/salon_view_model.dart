@@ -211,7 +211,6 @@ class SalonViewModel extends RepoViewModel {
       if (t.status == 'COMPLETED')
         for (final id in attendedHere(t)) (t, id),
   ];
-  int get minutesTrained => certificates.fold(0, (m, c) => m + c.$1.durationMin);
 
   // ── verification checklist ──
 

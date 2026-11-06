@@ -58,11 +58,6 @@ class SetupViewModel extends ViewModel {
     notify();
   }
 
-  void update(void Function() f) {
-    f();
-    notify();
-  }
-
   Future<void> create() async {
     final s = await _salons.createSalon(name: name, phone: phone, about: about, branchName: branchName, address: address, area: area, city: city);
     final at = location;

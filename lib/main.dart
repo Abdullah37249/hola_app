@@ -4,6 +4,7 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'domain/entities/entities.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -31,6 +32,8 @@ import 'shared/widgets/fx.dart';
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+  // Release builds keep the device log quiet (no ids or server details).
+  if (kReleaseMode) debugPrint = (String? message, {int? wrapWidth}) {};
   // Safety net: an error from background work nobody awaited (a sync, a
   // fire-and-forget call) is logged instead of reaching the zone unhandled.
   // Screen errors still go through FlutterError's own handler.
